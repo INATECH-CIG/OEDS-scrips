@@ -15,10 +15,8 @@ import pandas as pd
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List, Any
+from typing import Dict, Optional, Tuple, List
 from dotenv import load_dotenv
-from urllib.parse import quote_plus
-from sqlalchemy import create_engine
 
 # Resolve project root explicitly to guarantee localized environment variable discovery
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -33,38 +31,21 @@ if not ENTSOE_API_KEY:
         "Please visit https://transparency.entsoe.eu/ to obtain a key."
     )
 
-# --- DATABASE SETTINGS ---
-DB_USER = os.getenv("POSTGRES_USER")
-DB_PASS = os.getenv("POSTGRES_PASSWORD")
-DB_NAME = os.getenv("POSTGRES_DB")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5433")
-
 # --- LOGGING & DEBUG ---
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 DEBUG_MODE = os.getenv("DEBUG_MODE", "False").lower() == "true"
 
 logger = logging.getLogger(__name__)
 
-def get_db_engine():
-    """Constructs the SQLAlchemy database engine instance."""
-    if not all([DB_USER, DB_PASS, DB_NAME]):
-        raise EnvironmentError("Missing critical DB credentials in .env")
-        
-    encoded_pass = quote_plus(DB_PASS)
-    uri = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    
-    return create_engine(uri, echo=DEBUG_MODE)
-
 class PipelineConfig:
     def __init__(
         self, 
         date_range: Tuple[str, str],
-        key_file: str = "keys.yaml", 
         run_flags: Optional[Dict[str, bool]] = None,
         target_zones: Optional[List[str]] = None,
         data_types: Optional[Dict[str, bool]] = None,
-        io_settings: Optional[Dict[str, Any]] = None,
+        debug_mode: bool = False,
+        db_schema_name = None,
         analysis_flags: Optional[Dict[str, bool]] = None
     ):
         # ==========================================
@@ -72,7 +53,7 @@ class PipelineConfig:
         # ==========================================
         self.project_root = PROJECT_ROOT
         self.output_dir = self.project_root / "outputs"
-        self.input_dir = self.project_root / "inputs"
+        self.input_dir = self.project_root / "exchange_analysis/inputs"
         
         # ==========================================
         # TEMPORAL BOUNDARIES
@@ -81,8 +62,7 @@ class PipelineConfig:
         raw_end = pd.Timestamp(date_range[1], tz="UTC")
 
         self.log_level = LOG_LEVEL
-        self.debug_mode = DEBUG_MODE
-        
+
         # Shift absolute midnight bounds backward to ensure API block inclusivity
         if raw_end.hour == 0 and raw_end.minute == 0:
             self.end = raw_end - pd.Timedelta(minutes=1)
@@ -112,17 +92,8 @@ class PipelineConfig:
         }
         if analysis_flags: self.analysis_flags.update(analysis_flags)
 
-        # ==========================================
-        # DATA I/O ROUTING
-        # ==========================================
-        self.save_csv = True
-        self.save_db = True
-        self.load_source = 'csv' # Authorized flags: 'csv' or 'db'
-        
-        if io_settings:
-            self.save_csv = io_settings.get("save_csv", self.save_csv)
-            self.save_db = io_settings.get("save_db", self.save_db)
-            self.load_source = io_settings.get("load_source", self.load_source)
+        self.debug_mode = debug_mode
+        self.db_schema_name = db_schema_name
 
         # ==========================================
         # API DOWNLOAD FILTERS
@@ -139,7 +110,7 @@ class PipelineConfig:
         # ==========================================
         # SPATIAL CONFIGURATION (ZONES & TOPOLOGY)
         # ==========================================
-        yaml_path = self.project_root / "config.yaml"
+        yaml_path = self.project_root/ "exchange_analysis/config.yaml"
         if not yaml_path.exists():
             raise FileNotFoundError(f"Config YAML not found at {yaml_path}")
             
@@ -164,6 +135,9 @@ class PipelineConfig:
             logger.info(f"Configured for subset of zones: {self.target_zones}")
         else:
             self.target_zones = self.all_zones
+
+        if self.debug_mode:
+            self.target_zones = self.target_zones[:3]
 
         # ==========================================
         # CREDENTIALS & METADATA

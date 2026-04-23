@@ -1,0 +1,21 @@
+entsoe,converted,is_storage,year_2020,year_2021,year_2022,year_2023,year_2024
+Solar,Solar,False,0.0,0.0,0.0,0.0,0.0
+Wind Onshore,Wind Onshore,False,0.0,0.0,0.0,0.0,0.0
+Wind Offshore,Wind Offshore,False,0.0,0.0,0.0,0.0,0.0
+Biomass,Biomass,False,0.0,0.0,0.0,0.0,0.0
+Hydro Water Reservoir,Hydro,False,0.0,0.0,0.0,0.0,0.0
+Hydro Run-of-river and poundage,Hydro,False,0.0,0.0,0.0,0.0,0.0
+Geothermal,Other renewable,False,0.0,0.0,0.0,0.0,0.0
+Marine,Other renewable,False,0.0,0.0,0.0,0.0,0.0
+Other renewable,Other renewable,False,0.0,0.0,0.0,0.0,0.0
+Storage,Storage,True,0.251,0.29,0.392,0.274,0.274
+Nuclear,Nuclear,False,0.0,0.0,0.0,0.0,0.0
+Fossil Brown coal/Lignite,Lignite,False,1.1,1.082,1.074,1.074,1.074
+Fossil Hard coal,Hard coal,False,0.854,0.845,0.844,0.844,0.844
+Fossil Gas,Gas,False,0.371,0.377,0.379,0.379,0.379
+Fossil Oil,Other fossil,False,1.427,1.38,1.346,1.346,1.346
+Waste,Other fossil,False,1.427,1.38,1.346,1.346,1.346
+Fossil Coal-derived gas,Other fossil,False,1.427,1.38,1.346,1.346,1.346
+Fossil Oil shale,Other fossil,False,1.427,1.38,1.346,1.346,1.346
+Fossil Peat,Other fossil,False,1.427,1.38,1.346,1.346,1.346
+Other,Other fossil,False,1.427,1.38,1.346,1.346,1.346

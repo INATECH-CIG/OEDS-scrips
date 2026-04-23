@@ -12,12 +12,11 @@ flow tracing, and performing copper-plate pooling calculations across the Europe
 
 import pandas as pd
 import numpy as np
-import os
-import tqdm
 import logging
 from typing import Dict, Optional, Tuple, List, Any
 from config import PipelineConfig
-from utils import DataIO
+from utils import IOHandler
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +25,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 def _load_if_missing(
     config: PipelineConfig, 
-    io: DataIO, 
-    gen_dfs: Optional[Dict[str, pd.DataFrame]], 
+    gen_dfs: Optional[Dict[str, pd.DataFrame]],
     comm_dfs: Optional[Dict[str, pd.DataFrame]] = None, 
     phys_dfs: Optional[Dict[str, pd.DataFrame]] = None
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
@@ -40,7 +38,7 @@ def _load_if_missing(
         gen_dir = config.get_output_path("generation_demand_data_bidding_zones")
         gen_dfs = {}
         for bz in config.zones:
-            df = io.load(gen_dir / f"{bz}_generation_demand_data_bidding_zones.csv", "processed_generation", config, bz=bz)
+            df = IOHandler.load(gen_dir / f"{bz}_generation_demand.csv", config)
             if df is not None:
                 # Extract and synchronize global data vintage
                 if "source_download_date" in df.columns and not hasattr(config, "analysis_source_date"):
@@ -57,7 +55,7 @@ def _load_if_missing(
         comm_dir = config.get_output_path("comm_flow_total_bidding_zones")
         comm_dfs = {}
         for bz in config.zones:
-            df = io.load(comm_dir / f"{bz}_comm_flow_total_bidding_zones.csv", "processed_commercial_flows", config, bz=bz)
+            df = IOHandler.load(comm_dir / f"{bz}_raw_commercial_flows.csv", config)
             if df is not None:
                 if "source_download_date" in df.columns and not hasattr(config, "analysis_source_date"):
                     config.analysis_source_date = str(df["source_download_date"].iloc[0]).split()[0]
@@ -72,7 +70,7 @@ def _load_if_missing(
         flow_dir = config.get_output_path("physical_flow_data_bidding_zones")
         phys_dfs = {}
         for bz in config.zones:
-            df = io.load(flow_dir / f"{bz}_physical_flow_data_bidding_zones.csv", "processed_physical_flows", config, bz=bz)
+            IOHandler.load(flow_dir / f"{bz}_raw_physical_flows.csv", config)
             if df is not None:
                 if "source_download_date" in df.columns and not hasattr(config, "analysis_source_date"):
                     config.analysis_source_date = str(df["source_download_date"].iloc[0]).split()[0]
@@ -89,8 +87,7 @@ def _load_if_missing(
 # ==========================================
 def perform_decomposition_analysis(
     config: PipelineConfig, 
-    io: DataIO, 
-    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None, 
+    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None,
     comm_dfs: Optional[Dict[str, pd.DataFrame]] = None
 ) -> None:
     """
@@ -98,7 +95,7 @@ def perform_decomposition_analysis(
     mix fractions of the respective source bidding zones.
     """
     logger.info("=== STARTING COMMERCIAL FLOW DECOMPOSITION ===")
-    gen_dfs_loaded, comm_dfs_loaded, _ = _load_if_missing(config, io, gen_dfs, comm_dfs=comm_dfs)
+    gen_dfs_loaded, comm_dfs_loaded, _ = _load_if_missing(config, gen_dfs, comm_dfs=comm_dfs)
     agg_map = config.gen_types_df.groupby(['converted'])['entsoe'].apply(list).to_dict()
     base_out = config.output_dir / "comm_flow_total_bidding_zones" / str(config.year) / "results"
     
@@ -121,9 +118,8 @@ def perform_decomposition_analysis(
             if f"{n}_{bz}" in comm_dfs_loaded[bz].columns: raw_total_imports[n] = comm_dfs_loaded[bz][f"{n}_{bz}"]
             if f"{bz}_{n}_netted_import" in comm_dfs_loaded[bz].columns: raw_netted_imports[n] = comm_dfs_loaded[bz][f"{bz}_{n}_netted_import"]
 
-        io.save(raw_total_imports, dirs["per_bidding_zone"] / f"{bz}_import_comm_flow_total_per_bidding_zone.csv", "analysis_cft_total_bz", config, bz=bz)
-        io.save(raw_netted_imports, dirs["netted_per_bidding_zone"] / f"{bz}_import_comm_flow_total_netted_per_bidding_zone.csv", "analysis_cft_netted_bz", config, bz=bz)
-            
+        IOHandler.save(raw_total_imports, f"{bz}_import_comm_flow_total_per_bidding_zone",dirs["per_bidding_zone"] , config )
+        IOHandler.save(raw_netted_imports, f"{bz}_import_comm_flow_total_netted_per_bidding_zone", dirs["netted_per_bidding_zone"], config)
     logger.info("[Decomposition] Calculating generation mix fractions...")
     gen_fractions: Dict[str, pd.DataFrame] = {}
     for bz, df in gen_dfs_loaded.items():
@@ -159,9 +155,9 @@ def perform_decomposition_analysis(
         if total_imp_list:
             total_full = pd.concat(total_imp_list, axis=1)
             netted_full = pd.concat(netted_imp_list, axis=1)
-            io.save(total_full, dirs["per_type_per_bidding_zone"] / f"{bz}_import_comm_flow_total_per_type_per_bidding_zone.csv", "analysis_cft_total_type_bz", config, bz=bz)
-            io.save(netted_full, dirs["netted_per_type_per_bidding_zone"] / f"{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone.csv", "analysis_cft_netted_type_bz", config, bz=bz)
-            
+            IOHandler.save(total_full, f"{bz}_import_comm_flow_total_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"], config)
+            IOHandler.save(netted_full,  f"{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone", dirs["netted_per_type_per_bidding_zone"], config)
+
             # Aggregate by specific technology type
             per_type = pd.DataFrame(index=config.time_index)
             per_type_net = pd.DataFrame(index=config.time_index)
@@ -170,8 +166,8 @@ def perform_decomposition_analysis(
                 if cols_exact:
                     per_type[tech], per_type_net[tech] = total_full[cols_exact].sum(axis=1), netted_full[cols_exact].sum(axis=1)
 
-            io.save(per_type, dirs["per_type"] / f"{bz}_import_comm_flow_total_per_type.csv", "analysis_cft_total_type", config, bz=bz)
-            io.save(per_type_net, dirs["netted_per_type"] / f"{bz}_import_comm_flow_total_netted_per_type.csv", "analysis_cft_netted_type", config, bz=bz)
+            IOHandler.save(per_type, f"{bz}_import_comm_flow_total_per_type", dirs["per_type"], config)
+            IOHandler.save(per_type_net, f"{bz}_import_comm_flow_total_netted_per_type", dirs["netted_per_type"], config)
             
             # Aggregate by broader categorical mappings (e.g., Fossil, Renewable)
             per_agg = pd.DataFrame(index=config.time_index)
@@ -179,10 +175,9 @@ def perform_decomposition_analysis(
             for cat, techs in agg_map.items():
                 valid = [t for t in techs if t in per_type.columns]
                 if valid: per_agg[cat], per_agg_net[cat] = per_type[valid].sum(axis=1), per_type_net[valid].sum(axis=1)
-            
-            io.save(per_agg, dirs["per_agg_type"] / f"{bz}_import_comm_flow_total_per_agg_type.csv", "analysis_cft_total_agg", config, bz=bz)
-            io.save(per_agg_net, dirs["netted_per_agg_type"] / f"{bz}_import_comm_flow_total_netted_per_agg_type.csv", "analysis_cft_netted_agg", config, bz=bz)
-            
+
+            IOHandler.save(per_agg, f"{bz}_import_comm_flow_total_per_agg_type", dirs["per_agg_type"], config )
+            IOHandler.save(per_agg_net, f"{bz}_import_comm_flow_total_netted_per_agg_type", dirs["netted_per_agg_type"], config )
     logger.info("[Decomposition] Analysis Complete.")
 
 # ==========================================
@@ -190,8 +185,7 @@ def perform_decomposition_analysis(
 # ==========================================
 def _decompose_and_save(
     config: PipelineConfig, 
-    io: DataIO, 
-    traced_dfs: Dict[str, pd.DataFrame], 
+    traced_dfs: Dict[str, pd.DataFrame],
     base_dir: Any, 
     label: str, 
     gen_dfs: Dict[str, pd.DataFrame]
@@ -224,7 +218,7 @@ def _decompose_and_save(
         if count % 5 == 0 or count == total_zones:
             logger.info(f"      [{count}/{total_zones}] Saving results for {bz}...")
             
-        io.save(traced_dfs[bz], per_bz_dir / f"{bz}_import_flow_tracing_{label}_per_bidding_zone.csv", f"tracing_{label}_bz", config, bz=bz)
+        IOHandler.save(traced_dfs[bz], f"{bz}_import_flow_tracing_{label}_per_bidding_zone",per_bz_dir, config,)
         
         type_dfs: List[pd.DataFrame] = []
         for n in config.zones:
@@ -235,19 +229,19 @@ def _decompose_and_save(
         
         if type_dfs:
             full_type = pd.concat(type_dfs, axis=1)
-            io.save(full_type, per_type_dir / f"{bz}_import_flow_tracing_{label}_per_type_per_bidding_zone.csv", f"tracing_{label}_type_bz", config, bz=bz)
+            IOHandler.save(full_type, f"{bz}_import_flow_tracing_{label}_per_type_per_bidding_zone", per_type_dir, config)
             
             per_type = pd.DataFrame(index=config.time_index)
             for tech in config.gen_types_list:
                 cols_exact = [c for c in full_type.columns if c.split('_')[-1].strip() == tech]
                 if cols_exact: per_type[tech] = full_type[cols_exact].sum(axis=1)
-            io.save(per_type, per_type_total_dir / f"{bz}_import_flow_tracing_{label}_per_type.csv", f"tracing_{label}_type", config, bz=bz)
+            IOHandler.save(per_type, f"{bz}_import_flow_tracing_{label}_per_type", per_type_total_dir, config)
             
             per_agg = pd.DataFrame(index=config.time_index)
             for cat, techs in agg_map.items():
                 valid = [t for t in techs if t in per_type.columns]
                 if valid: per_agg[cat] = per_type[valid].sum(axis=1)
-            io.save(per_agg, per_agg_total_dir / f"{bz}_import_flow_tracing_{label}_per_agg_type.csv", f"tracing_{label}_agg", config, bz=bz)
+            IOHandler.save(per_agg, f"{bz}_import_flow_tracing_{label}_per_agg_type", per_agg_total_dir, config)
             
     logger.info(f"[{label.upper()}] Save Complete.")
 
@@ -256,8 +250,7 @@ def _decompose_and_save(
 # ==========================================
 def perform_aggregated_flow_tracing(
     config: PipelineConfig, 
-    io: DataIO,
-    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None, 
+    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None,
     phys_flow_dfs: Optional[Dict[str, pd.DataFrame]] = None
 ) -> None:
     """
@@ -265,7 +258,7 @@ def perform_aggregated_flow_tracing(
     Net positions define the nodal injections.
     """
     logger.info("Starting Aggregated Coupling Flow Tracing...")
-    gen_dfs_loaded, _, phys_flow_dfs_loaded = _load_if_missing(config, io, gen_dfs, phys_dfs=phys_flow_dfs)
+    gen_dfs_loaded, _, phys_flow_dfs_loaded = _load_if_missing(config, gen_dfs, phys_dfs=phys_flow_dfs)
     for bz in config.zones:
         if bz in gen_dfs_loaded: gen_dfs_loaded[bz] = gen_dfs_loaded[bz].resample("1h").mean(numeric_only=True).fillna(0)
         if bz in phys_flow_dfs_loaded: phys_flow_dfs_loaded[bz] = phys_flow_dfs_loaded[bz].resample("1h").mean(numeric_only=True).fillna(0)
@@ -275,7 +268,7 @@ def perform_aggregated_flow_tracing(
     sing_times: List[pd.Timestamp] = []
     
     logger.info("[Agg. Coupling] Inverting Matrices...")
-    for t in tqdm.tqdm(config.time_index):
+    for t in config.time_index:
         Pin: List[List[float]] = []
         A: List[List[float]] = []
         net_imps: List[float] = []
@@ -346,12 +339,11 @@ def perform_aggregated_flow_tracing(
     elif log_path.exists():
         log_path.unlink()
         
-    _decompose_and_save(config, io, agg_tracing, agg_dir, "agg_coupling", gen_dfs_loaded)
+    _decompose_and_save(config, agg_tracing, agg_dir, "agg_coupling", gen_dfs_loaded)
 
 def perform_direct_flow_tracing(
     config: PipelineConfig, 
-    io: DataIO,
-    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None, 
+    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None,
     phys_flow_dfs: Optional[Dict[str, pd.DataFrame]] = None
 ) -> None:
     """
@@ -359,7 +351,7 @@ def perform_direct_flow_tracing(
     Uses absolute internal generation and demand as the primary nodal properties.
     """
     logger.info("Starting Direct Coupling Flow Tracing...")
-    gen_dfs_loaded, _, phys_flow_dfs_loaded = _load_if_missing(config, io, gen_dfs, phys_dfs=phys_flow_dfs)
+    gen_dfs_loaded, _, phys_flow_dfs_loaded = _load_if_missing(config, gen_dfs, phys_dfs=phys_flow_dfs)
     for bz in config.zones:
         if bz in gen_dfs_loaded: gen_dfs_loaded[bz] = gen_dfs_loaded[bz].resample("1h").mean(numeric_only=True).fillna(0)
         if bz in phys_flow_dfs_loaded: phys_flow_dfs_loaded[bz] = phys_flow_dfs_loaded[bz].resample("1h").mean(numeric_only=True).fillna(0)
@@ -369,7 +361,7 @@ def perform_direct_flow_tracing(
     sing_times: List[pd.Timestamp] = []
     
     logger.info("[Direct Coupling] Inverting Matrices...")
-    for t in tqdm.tqdm(config.time_index):
+    for t in config.time_index:
         Gin: List[List[float]] = []
         A: List[List[float]] = []
         demands: List[float] = []
@@ -457,15 +449,14 @@ def perform_direct_flow_tracing(
     elif log_path.exists():
         log_path.unlink()
         
-    _decompose_and_save(config, io, dir_tracing, direct_dir, "direct_coupling", gen_dfs_loaded)
+    _decompose_and_save(config, dir_tracing, direct_dir, "direct_coupling", gen_dfs_loaded)
 
 # ==========================================
 # PART 3: POOLING
 # ==========================================
 def perform_pooling_analysis(
     config: PipelineConfig, 
-    io: DataIO,
-    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None, 
+    gen_dfs: Optional[Dict[str, pd.DataFrame]] = None,
     comm_dfs: Optional[Dict[str, pd.DataFrame]] = None, 
     phys_flow_dfs: Optional[Dict[str, pd.DataFrame]] = None
 ) -> None:
@@ -474,7 +465,7 @@ def perform_pooling_analysis(
     sourced from all net exporters in the network, independent of exact grid topology.
     """
     logger.info("=== STARTING POOLING ANALYSIS ===")
-    gen_dfs_loaded, comm_dfs_loaded, phys_flow_dfs_loaded = _load_if_missing(config, io, gen_dfs, comm_dfs, phys_flow_dfs)
+    gen_dfs_loaded, comm_dfs_loaded, phys_flow_dfs_loaded = _load_if_missing(config, gen_dfs, comm_dfs, phys_flow_dfs)
     
     logger.info("[Pooling] 1/4: Calculating generation fractions for all zones...")
     gen_fractions: Dict[str, pd.DataFrame] = {}
@@ -500,7 +491,7 @@ def perform_pooling_analysis(
             if count % 5 == 0 or count == total_zones:
                 logger.info(f"      [{count}/{total_zones}] Saving {bz}...")
                 
-            io.save(df_imp, dirs["per_bidding_zone"] / f"{bz}_pooled_{file_p}_per_bidding_zone.csv", f"pool_{name}_bz", config, bz=bz)
+            IOHandler.save(df_imp,f"{bz}_pooled_{file_p}_per_bidding_zone", dirs["per_bidding_zone"] , config )
             
             type_dfs: List[pd.DataFrame] = []
             for src in [s for s in config.zones if s in df_imp.columns and s in gen_fractions]:
@@ -510,19 +501,19 @@ def perform_pooling_analysis(
             
             if type_dfs:
                 full = pd.concat(type_dfs, axis=1)
-                io.save(full, dirs["per_type_per_bidding_zone"] / f"{bz}_pooled_{file_p}_per_type_per_bidding_zone.csv", f"pool_{name}_type_bz", config, bz=bz)
+                IOHandler.save(full, f"{bz}_pooled_{file_p}_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"] , config)
                 
                 per_type = pd.DataFrame(index=config.time_index)
                 for tech in config.gen_types_list:
                     cols_exact = [c for c in full.columns if c.split('_')[-1].strip() == tech]
                     if cols_exact: per_type[tech] = full[cols_exact].sum(axis=1)
-                io.save(per_type, dirs["per_type"] / f"{bz}_pooled_{file_p}_per_type.csv", f"pool_{name}_type", config, bz=bz)
+                IOHandler.save(per_type, f"{bz}_pooled_{file_p}_per_type", dirs["per_type"] , config)
                 
                 per_agg = pd.DataFrame(index=config.time_index)
                 for cat, techs in agg_map.items():
                     valid = [t for t in techs if t in per_type.columns]
                     if valid: per_agg[cat] = per_type[valid].sum(axis=1)
-                io.save(per_agg, dirs["per_agg_type"] / f"{bz}_pooled_{file_p}_per_agg_type.csv", f"pool_{name}_agg", config, bz=bz)
+                IOHandler.save(per_agg, f"{bz}_pooled_{file_p}_per_agg_type", dirs["per_agg_type"] , config)
 
     # Construct system-wide export/import matrices for proportional allocation
     tot_exp = pd.DataFrame(index=config.time_index)
@@ -556,7 +547,7 @@ def perform_pooling_analysis(
 # ==========================================
 # PART 4: POST PROCESSING AGGREGATION
 # ==========================================
-def perform_post_processing_aggregation(config: PipelineConfig, io: DataIO) -> None:
+def perform_post_processing_aggregation(config: PipelineConfig) -> None:
     """
     Aggregates high-granularity hourly MW flows into final annualized TWh totals
     for high-level methodology comparison.
@@ -575,8 +566,8 @@ def perform_post_processing_aggregation(config: PipelineConfig, io: DataIO) -> N
     totals_out = base_out / f"annual_totals_per_method/{year}"
     sub_outs = {k: totals_out / v for k,v in [("imp_bz", "import/per_bidding_zone"), ("exp_bz", "export/per_bidding_zone"), ("imp_type", "import/per_type"), ("exp_type", "export/per_type"), ("imp_agg", "import/per_agg_type")]}
 
-    def load_clean(io: DataIO, path: Any, table_prefix: str, bz: str, drop: Optional[str] = None) -> Optional[pd.DataFrame]:
-        df = io.load(path, table_prefix, config, bz=bz)
+    def load_clean(path: Any, table_prefix: str, bz: str, drop: Optional[str] = None) -> Optional[pd.DataFrame]:
+        df = IOHandler.load(path, config)
         if df is None: return None
         df = df.loc[:, ~df.columns.duplicated()].apply(pd.to_numeric, errors='coerce').fillna(0.0)
         if drop and drop in df.columns: df = df.drop(columns=[drop])
@@ -596,7 +587,7 @@ def perform_post_processing_aggregation(config: PipelineConfig, io: DataIO) -> N
     gen_dir = config.get_output_path("generation_demand_data_bidding_zones")
     gen_fractions: Dict[str, pd.DataFrame] = {}
     for bz in config.zones:
-        df = load_clean(io, gen_dir / f"{bz}_generation_demand_data_bidding_zones.csv", "processed_generation", bz)
+        df = load_clean(gen_dir / f"{bz}_generation_demand_data_bidding_zones.csv", "processed_generation", bz)
         if df is not None:
             df = df.resample("1h").mean(numeric_only=True).fillna(0)
             total = df["Total Generation"].replace(0, 1)
@@ -607,7 +598,7 @@ def perform_post_processing_aggregation(config: PipelineConfig, io: DataIO) -> N
     imports: Dict[str, Dict[str, Optional[pd.DataFrame]]] = {m: {} for m in paths}
     for bz in config.zones:
         for m, (base_p, prefix, fname_template) in paths.items():
-            imports[m][bz] = load_clean(io, base_p / fname_template.format(bz=bz), prefix, bz, drop=bz)
+            imports[m][bz] = load_clean(base_p / fname_template.format(bz=bz), prefix, bz, drop=bz)
         
         ac = imports["AC Flow Tracing"].get(bz)
         pooled = imports["Pooled Net Phys."].get(bz)
@@ -658,10 +649,10 @@ def perform_post_processing_aggregation(config: PipelineConfig, io: DataIO) -> N
         res_imp_type = res_imp_type.apply(pd.to_numeric, errors='coerce').fillna(0.0) / 1e6
         res_exp_type = res_exp_type.apply(pd.to_numeric, errors='coerce').fillna(0.0) / 1e6
         
-        io.save(res_imp_bz.T, sub_outs["imp_bz"] / f"{bz}_annual_totals_import_per_bidding_zone_{year}.csv", "annual_imp_bz", config, bz=bz)
-        io.save(res_exp_bz.T, sub_outs["exp_bz"] / f"{bz}_annual_totals_export_per_bidding_zone_{year}.csv", "annual_exp_bz", config, bz=bz)
-        io.save(res_imp_type.T, sub_outs["imp_type"] / f"{bz}_annual_totals_import_per_type_{year}.csv", "annual_imp_type", config, bz=bz)
-        io.save(res_exp_type.T, sub_outs["exp_type"] / f"{bz}_annual_totals_export_per_type_{year}.csv", "annual_exp_type", config, bz=bz)
+        IOHandler.save(res_imp_bz, f"{bz}_annual_totals_import_per_bidding_zone_{year}", sub_outs["imp_bz"], config)
+        IOHandler.save(res_exp_bz.T, f"{bz}_annual_totals_export_per_bidding_zone_{year}", sub_outs["exp_bz"], config)
+        IOHandler.save(res_imp_type.T, f"{bz}_annual_totals_import_per_type_{year}", sub_outs["imp_type"], config)
+        IOHandler.save(res_exp_type.T, f"{bz}_annual_totals_export_per_type_{year}", sub_outs["exp_type"], config)
         
         res_agg = pd.DataFrame(dtype=float)
         for m in res_imp_type.index:
@@ -669,6 +660,6 @@ def perform_post_processing_aggregation(config: PipelineConfig, io: DataIO) -> N
                 valid = [t for t in techs if t in res_imp_type.columns]
                 res_agg.loc[m, cat] = res_imp_type.loc[m, valid].sum()
         
-        io.save(res_agg.T, sub_outs["imp_agg"] / f"{bz}_annual_totals_import_per_agg_type_{year}.csv", "annual_imp_agg", config, bz=bz)
+        IOHandler.save(res_agg.T, f"{bz}_annual_totals_import_per_agg_type_{year}", sub_outs["imp_agg"], config)
 
     logger.info("Post-Processing Complete.")

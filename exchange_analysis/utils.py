@@ -18,9 +18,7 @@ import sys
 import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple, Any, Callable, Union
-from sqlalchemy import text, inspect
-
-from config import get_db_engine
+from postgres_utils import df_to_timescale
 
 logger = logging.getLogger(__name__)
 
@@ -64,136 +62,43 @@ def _merge_gap_methods(df_target: pd.DataFrame, df_source: pd.DataFrame) -> None
 # ==========================================
 # DATA I/O HANDLER
 # ==========================================
-class DataIO:
-    """
-    Centralized Data Input/Output Handler.
-    Orchestrates dual-writing to local flat CSV files and a configured database instance.
-    """
-    def __init__(self, config: Any) -> None:
-        self.save_db = getattr(config, 'save_db', False)
-        self.load_source = getattr(config, 'load_source', 'csv')
-
-        if self.save_db or self.load_source == 'db':
-            self.engine = get_db_engine()
-        else:
-            self.engine = None
-            logger.info("[IO] Running in CSV-only mode. No database engine initialized.")
-
-    def save(self, df: Optional[Union[pd.DataFrame, pd.Series]], filepath: Path, table_name: str, config: Any, bz: Optional[str] = None) -> None:
-        """Persists structural arrays to defined storage mediums, handling schema evolution."""
-        if df is None or df.empty: return
-
-        df_out = df.to_frame() if isinstance(df, pd.Series) else df.copy()
-        
-        if bz is not None:
-            df_out["bidding_zone"] = bz
+class IOHandler:
+    @staticmethod
+    def save(df, tablename, directory,config):
+        df = df.reset_index().rename(columns={"index": "time"})
 
         # Route metadata structures based on whether the data is raw extraction or downstream analysis
-        is_result_table = table_name.startswith(("analysis_", "tracing_", "pool_", "annual_", "processed_"))
-        
+        is_result_table = tablename.startswith(("analysis_", "tracing_", "pool_", "annual_", "processed_"))
+
         if is_result_table:
             date_val = getattr(config, 'analysis_source_date', pd.Timestamp.utcnow().strftime('%Y-%m-%d'))
-            df_out["source_download_date"] = date_val
+            df["source_download_date"] = date_val
             meta_cols = ["gap_filling_method", "bidding_zone", "source_download_date"]
         else:
-            df_out["download_timestamp"] = pd.Timestamp.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            df["download_timestamp"] = pd.Timestamp.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
             meta_cols = ["gap_filling_method", "bidding_zone", "download_timestamp"]
 
         # Enforce column order to maintain tabular consistency
-        data_cols = [c for c in df_out.columns if c not in meta_cols]
-        present_meta = [c for c in meta_cols if c in df_out.columns]
-        df_out = df_out[data_cols + present_meta]
+        data_cols = [c for c in df.columns if c not in meta_cols]
+        present_meta = [c for c in meta_cols if c in df.columns]
+        df = df[data_cols + present_meta]
 
-        # 1. Execute local flat-file persistence
-        if getattr(config, 'save_csv', True):
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            df_out.to_csv(filepath)
+        #save as csv
+        df_to_timescale(df,tablename, config.db_schema_name)
 
-        # 2. Execute relational database persistence
-        if getattr(config, 'save_db', True):
-            clean_table = table_name.lower().replace("-", "_").replace(" ", "_")[:63]
+        #save to timescale
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        df.to_csv(directory / f"{tablename}.csv", index=False)
 
-            if bz is not None:
-                if isinstance(df.index, pd.DatetimeIndex):
-                    min_time = df.index.min().strftime('%Y-%m-%d %H:%M:%S%z')
-                    max_time = df.index.max().strftime('%Y-%m-%d %H:%M:%S%z')
-                    index_col = df.index.name or 'index'
-
-                    delete_query = text(f"""
-                        DELETE FROM {clean_table}
-                        WHERE bidding_zone = '{bz}'
-                        AND "{index_col}" >= '{min_time}'
-                        AND "{index_col}" <= '{max_time}'
-                    """)
-                else:
-                    delete_query = text(f"""
-                        DELETE FROM {clean_table}
-                        WHERE bidding_zone = '{bz}'
-                    """)
-
-                with self.engine.begin() as conn:
-                    try:
-                        conn.execute(delete_query)
-                    except Exception:
-                        pass 
-
-            # Evaluate and apply dynamic schema evolution
-            try:
-                inspector = inspect(self.engine)
-                if inspector.has_table(clean_table):
-                    existing_cols = [col['name'] for col in inspector.get_columns(clean_table)]
-                    new_cols = [c for c in df_out.columns if c not in existing_cols]
-
-                    if new_cols:
-                        with self.engine.begin() as conn:
-                            for c in new_cols:
-                                col_type = "TEXT" if c in meta_cols else "DOUBLE PRECISION"
-                                conn.execute(text(f'ALTER TABLE {clean_table} ADD COLUMN "{c}" {col_type}'))
-            except Exception as e:
-                logger.warning(f"[DB Schema Warning] Could not auto-evolve schema for {clean_table}: {e}")
-
-            try:
-                df_out.to_sql(clean_table, self.engine, if_exists="append")
-            except Exception as e:
-                logger.error(f"[DB Error] Failed to save {clean_table} to database: {e}")
-
-    def load(self, filepath: Path, table_name: str, config: Any, bz: Optional[str] = None) -> Optional[pd.DataFrame]:
-        """Retrieves stored datasets based on configured storage preference (CSV vs DB)."""
-        source = getattr(config, 'load_source', 'csv')
-        start_str = config.start.strftime('%Y-%m-%d %H:%M:%S%z')
-        end_str = config.end.strftime('%Y-%m-%d %H:%M:%S%z')
-
-        if source == 'db':
-            clean_table = table_name.lower().replace("-", "_").replace(" ", "_")[:63]
-            try:
-                base_query = f'SELECT * FROM {clean_table} WHERE "index" >= \'{start_str}\' AND "index" <= \'{end_str}\''
-                query = f"{base_query} AND bidding_zone = '{bz}'" if bz is not None else base_query
-
-                df = pd.read_sql(text(query), self.engine)
-                if df.empty:
-                    raise ValueError(f"No data found in DB for {clean_table} (bz={bz})")
-
-                index_col = str(df.columns[0])
-                df.set_index(index_col, inplace=True)
-                df.index = pd.to_datetime(df.index, utc=True)
-                df.index.name = None
-
-                if bz is not None and "bidding_zone" in df.columns:
-                    df = df.drop(columns=["bidding_zone"])
-
-                df.dropna(axis=1, how='all', inplace=True)
-                return df
-
-            except Exception as e:
-                logger.warning(f"[DB Warning] Falling back to CSV for {clean_table} (bz={bz}). Reason: {e}")
+    @staticmethod
+    def load(filepath, config):
 
         if filepath.exists():
             df = pd.read_csv(filepath, index_col=0)
             df.index = pd.to_datetime(df.index, utc=True)
+
             mask = (df.index >= config.start) & (df.index <= config.end)
             return df.loc[mask]
-
-        return None
 
 # ==========================================
 # LOGGING & API UTILS 
@@ -392,7 +297,6 @@ def patch_gaps_with_dayahead(
     bz: str,
     neighbour: str,
     config: Any, 
-    io: DataIO,
     min_gap_length: pd.Timedelta = pd.Timedelta(weeks=1)
 ) -> pd.DataFrame:
     """Leverages day-ahead commercial schedules as a physical proxy to impute extended missing flow blocks."""
@@ -411,7 +315,7 @@ def patch_gaps_with_dayahead(
     path = config.get_output_path(folder) / filename
     table_name = "processed_commercial_flows_da"
 
-    da_df = io.load(path, table_name, config, bz=bz)
+    da_df = IOHandler.load(path, config)
 
     if da_df is None or da_df.empty:
         return flow_df
@@ -436,7 +340,6 @@ def fill_gaps_wrapper(
     gaps_dir: Optional[Path],
     prefix: str,
     config: Optional[Any] = None,
-    io: DataIO = None,
     bz: Optional[str] = None,
     flow_type: Optional[str] = None,
     dayahead: bool = False
@@ -452,7 +355,7 @@ def fill_gaps_wrapper(
     if config and bz and (flow_type == "commercial") and (not dayahead):
         if hasattr(config, 'neighbours_map') and bz in config.neighbours_map:
             for neighbour in [n for n in config.neighbours_map[bz] if f"{bz}_{n}" in df.columns]:
-                df = patch_gaps_with_dayahead(df, gaps_dict, bz, neighbour, config, io)
+                df = patch_gaps_with_dayahead(df, gaps_dict, bz, neighbour, config)
 
     df_filled, new_gaps_dict = find_gaps(df, check_negatives=False, fill_gaps=True, gap_filling_rules=default_rules)
 

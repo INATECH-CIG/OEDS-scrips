@@ -1,0 +1,104 @@
+# ==========================================
+# EUROPEAN GRID TOPOLOGY (Bidding Zones)
+# ==========================================
+# Defines physical and commercial connection links between zones.
+neighbours:
+  BE: [NL, DE_AT_LU, FR, GB, DE_LU]
+  NL: [BE, DE_AT_LU, DE_LU, GB, NO_2, DK_1]
+  DE_AT_LU: [BE, CH, CZ, DK_1, DK_2, FR, IT_NORD, IT_NORD_AT, NL, PL, SE_4, SI]
+  FR: [BE, CH, DE_AT_LU, DE_LU, ES, GB, IT_NORD, IT_NORD_FR]
+  CH: [AT, DE_AT_LU, DE_LU, FR, IT_NORD, IT_NORD_CH]
+  AT: [CH, CZ, DE_LU, HU, IT_NORD, SI]
+  CZ: [AT, DE_AT_LU, DE_LU, PL, SK]
+  GB: [BE, FR, IE_SEM, NL, NO_2, DK_1]
+  NO_2: [DE_LU, DK_1, NL, NO_1, NO_5, GB]
+  HU: [AT, HR, RO, RS, SI, SK, UA]
+  IT_NORD: [CH, DE_AT_LU, FR, SI, AT, IT_CNOR]
+  ES: [FR, PT]
+  SI: [AT, DE_AT_LU, HR, IT_NORD, HU]
+  RS: [AL, BA, BG, HR, HU, ME, MK, RO]
+  PL: [CZ, DE_AT_LU, DE_LU, LT, SE_4, SK, UA]
+  ME: [AL, BA, RS, IT_CSUD]
+  DK_1: [DE_AT_LU, DE_LU, DK_2, NO_2, SE_3, NL, GB]
+  RO: [BG, HU, RS, UA]
+  LT: [BY, LV, PL, RU_KGD, SE_4]
+  BG: [GR, MK, RO, RS, TR]
+  SE_3: [DK_1, FI, NO_1, SE_2, SE_4]
+  LV: [EE, LT, RU]
+  IE_SEM: [GB]
+  IE: [GB, NIE]
+  NIE: [GB, IE]
+  BA: [HR, ME, RS]
+  NO_1: [NO_2, NO_3, NO_5, SE_3]
+  SE_4: [DE_AT_LU, DE_LU, DK_2, LT, PL, SE_3]
+  NO_5: [NO_1, NO_2, NO_3]
+  SK: [CZ, HU, PL, UA]
+  EE: [FI, LV, RU]
+  DK_2: [DE_AT_LU, DE_LU, DK_1, SE_4]
+  FI: [EE, NO_4, RU, SE_1, SE_3]
+  NO_4: [SE_2, FI, NO_3, SE_1]
+  SE_1: [FI, NO_4, SE_2]
+  SE_2: [NO_3, NO_4, SE_1, SE_3]
+  DE_LU: [AT, BE, CH, CZ, DK_1, DK_2, FR, NO_2, NL, PL, SE_4]
+  MK: [BG, GR, RS]
+  PT: [ES]
+  GR: [AL, BG, IT_BRNN, IT_GR, MK, TR, IT_SUD]
+  NO_3: [NO_1, NO_4, NO_5, SE_2]
+  IT: [AT, FR, GR, ME, SI, CH]
+  IT_BRNN: [GR, IT_SUD]
+  IT_SUD: [IT_BRNN, IT_CSUD, IT_FOGN, IT_ROSN, IT_CALA, GR]
+  IT_FOGN: [IT_SUD]
+  IT_ROSN: [IT_SICI, IT_SUD]
+  IT_CSUD: [IT_CNOR, IT_SARD, IT_SUD, ME]
+  IT_CNOR: [IT_NORD, IT_CSUD, IT_SARD]
+  IT_SARD: [IT_CNOR, IT_CSUD]
+  IT_SICI: [IT_CALA, IT_ROSN, MT]
+  IT_CALA: [IT_SICI, IT_SUD]
+  MT: [IT_SICI]
+  HR: [BA, HU, RS, SI]
+
+# ==========================================
+# TOPOLOGY CONSTRAINTS & CLASSIFICATIONS
+# ==========================================
+# Subsea or High-Voltage Direct Current (HVDC) links
+hvdc_borders:
+  - BE_GB
+  - DK_1_GB
+  - FR_GB
+  - GB_NL
+  - GB_NO_2
+  - GB_IE_SEM
+  - GB_IE
+  - GB_NIE
+  - DE_AT_LU_SE_4
+  - DE_LU_SE_4
+  - DK_2_SE_4
+  - LT_SE_4
+  - DE_AT_LU_DK_2
+  - DE_LU_DK_2
+  - DK_1_NO_2
+  - DK_1_NL
+  - NL_NO_2
+  - DE_LU_NO_2
+  - EE_FI
+  - IT_CSUD_ME
+  - GR_IT_SUD
+  - GR_IT_BRNN
+  - IT_CSUD_IT_SARD
+  - IT_CNOR_IT_SARD
+
+# Zones permitted to maintain physically valid 0.0 MW cross-border states
+valid_zero_zones:
+  - IT_SARD
+
+# Zones excluded from active matrix modeling (e.g., historical or structural anomalies)
+zones_to_remove:
+  - DE_AT_LU
+  - IE_SEM
+  - IE
+  - NIE
+  - MT
+  - IT
+  - IT_BRNN
+  - IT_ROSN
+  - IT_FOGN

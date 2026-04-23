@@ -16,10 +16,10 @@ import logging
 from datetime import datetime
 from io import StringIO
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional
 from entsoe import EntsoePandasClient
 from config import PipelineConfig
-from utils import DataIO, safe_query, fill_gaps_wrapper, correct_zero_values, _merge_gap_methods
+from utils import safe_query, fill_gaps_wrapper, correct_zero_values, _merge_gap_methods, IOHandler
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ GB_GENERATION_TYPES = [
 # ==========================================
 # GENERATION & DEMAND
 # ==========================================
-def download_generation_demand(client: EntsoePandasClient, config: PipelineConfig, io: DataIO) -> None:
+def download_generation_demand(client: EntsoePandasClient, config: PipelineConfig) -> None:
     """
     Retrieves raw generation and demand data for configured target zones.
     Routes GB queries to the BMRS API and all others to the ENTSO-E client.
@@ -57,10 +57,10 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
             gen_df = safe_query(client.query_generation, context=f"Generation {bz}", country_code=bz, start=config.start, end=config.end, nett=True)
             load_df = safe_query(client.query_load, context=f"Load {bz}", country_code=bz, start=config.start, end=config.end)
 
-        io.save(gen_df, raw_dir / f"{bz}_raw_generation.csv", "raw_generation", config, bz=bz)
-        io.save(load_df, raw_dir / f"{bz}_raw_load.csv", "raw_load", config, bz=bz)
+        IOHandler.save(gen_df, f"{bz}_raw_generation", raw_dir, config)
+        IOHandler.save(load_df, f"{bz}_raw_load", raw_dir, config)
 
-def process_generation_demand(config: PipelineConfig, io: DataIO) -> Dict[str, pd.DataFrame]:
+def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]:
     """
     Cleans, resamples, and merges raw generation and load data.
     Enforces gap-filling heuristics and recalculates structural net exports.
@@ -82,8 +82,8 @@ def process_generation_demand(config: PipelineConfig, io: DataIO) -> Dict[str, p
         gen_path = raw_dir / f"{bz}_raw_generation.csv"
         load_path = raw_dir / f"{bz}_raw_load.csv"
         
-        gen_df: Optional[pd.DataFrame] = io.load(gen_path, "raw_generation", config, bz=bz)
-        load_df: Optional[pd.DataFrame] = io.load(load_path, "raw_load", config, bz=bz)
+        gen_df = IOHandler.load(gen_path, config)
+        load_df = IOHandler.load(load_path, config)
 
         # Helper to extract the data vintage from either internal columns or OS file metadata
         def extract_vintage(df: Optional[pd.DataFrame], path: Path) -> None:
@@ -115,7 +115,7 @@ def process_generation_demand(config: PipelineConfig, io: DataIO) -> Dict[str, p
             gen_df[data_cols] = gen_df[data_cols].apply(pd.to_numeric, errors='coerce')
             gen_df = gen_df.resample("1h").mean(numeric_only=True)
             
-            gen_df = fill_gaps_wrapper(gen_df, gaps_dir, f"{bz}_gen", config=config, io=io, bz=bz)
+            gen_df = fill_gaps_wrapper(gen_df, gaps_dir, f"{bz}_gen", config=config, bz=bz)
             
             # Handle storage components separately to calculate distinct charge/discharge profiles
             storage_cols = [c for c in ["Hydro Pumped Storage", "Energy storage"] if c in gen_df.columns]
@@ -151,7 +151,7 @@ def process_generation_demand(config: PipelineConfig, io: DataIO) -> Dict[str, p
             data_cols = [c for c in load_df.columns if c not in meta_cols]
             load_df[data_cols] = load_df[data_cols].apply(pd.to_numeric, errors='coerce')
             load_df = load_df.resample("1h").mean(numeric_only=True)
-            load_df = fill_gaps_wrapper(load_df, gaps_dir, f"{bz}_load", config=config, io=io, bz=bz)
+            load_df = fill_gaps_wrapper(load_df, gaps_dir, f"{bz}_load", config=config, bz=bz)
 
         # 3. Merge and Balance
         if gen_df is not None:
@@ -191,14 +191,14 @@ def process_generation_demand(config: PipelineConfig, io: DataIO) -> Dict[str, p
 
     # Commit synchronized dataframes to designated IO channels
     for bz, final_df in gen_storage_dict.items():
-        io.save(final_df, out_dir / f"{bz}_generation_demand_data_bidding_zones.csv", "processed_generation", config, bz=bz)
+        IOHandler.save(final_df, f"{bz}_generation_demand",out_dir, config)
 
     return gen_storage_dict
 
 # ==========================================
 # FLOWS
 # ==========================================
-def download_flows(client: EntsoePandasClient, config: PipelineConfig, io: DataIO, flow_type: str = "commercial", dayahead: bool = False) -> None:
+def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> None:
     """
     Downloads scheduled commercial or physical cross-border exchanges.
     Builds the bilateral combinations based on the defined neighbor map.
@@ -225,10 +225,10 @@ def download_flows(client: EntsoePandasClient, config: PipelineConfig, io: DataI
             if f_in is not None: flow_df = pd.concat([flow_df, f_in.loc[~f_in.index.duplicated()].to_frame(name=f"{n}_{bz}")], axis=1)
 
         if flow_df is not None: 
-            table_name = f"raw_{flow_type}_flows" + ("_da" if dayahead else "")
-            io.save(flow_df.loc[~flow_df.index.duplicated()], raw_dir / f"{bz}_raw_flows.csv", table_name, config, bz=bz)
+            table_name = f"{bz}_raw_{flow_type}_flows{'_dayahead' if dayahead else ''}"
+            IOHandler.save(flow_df, table_name, raw_dir, config)
 
-def process_flows(config: PipelineConfig, io: DataIO, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
+def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
     """
     Standardizes bilateral flow matrices, applies gap imputation, and evaluates zero-flow legitimacy.
     Operates in two phases to guarantee a globally synchronized data vintage.
@@ -246,8 +246,7 @@ def process_flows(config: PipelineConfig, io: DataIO, flow_type: str = "commerci
         table_name = f"raw_{flow_type}_flows" + ("_da" if dayahead else "")
         flow_path = raw_dir / f"{bz}_raw_flows.csv"
 
-        df: Optional[pd.DataFrame] = io.load(flow_path, table_name, config, bz=bz)
-        
+        df = IOHandler.load(flow_path, config)
         if df is not None: 
             # 1. Primary: Check internal columns for data lineage
             if "download_timestamp" in df.columns:
@@ -271,7 +270,7 @@ def process_flows(config: PipelineConfig, io: DataIO, flow_type: str = "commerci
         df[data_cols] = df[data_cols].apply(pd.to_numeric, errors='coerce')
         df_resampled = df.resample("1h").mean(numeric_only=True)
 
-        df = fill_gaps_wrapper(df_resampled, gaps_dir, f"{bz}_flows", config=config, io=io, bz=bz, flow_type=flow_type, dayahead=dayahead)
+        df = fill_gaps_wrapper(df_resampled, gaps_dir, f"{bz}_flows", config=config, bz=bz, flow_type=flow_type, dayahead=dayahead)
         
         logger.info(f"[Process] {flow_type} flows for {bz} (Dayahead={dayahead})...")
 
@@ -311,14 +310,13 @@ def process_flows(config: PipelineConfig, io: DataIO, flow_type: str = "commerci
 
     # Commit synchronized dataframes to designated IO channels
     for bz, final_df in flow_dict.items():
-        filename = f"{bz}_comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones.csv" if flow_type == "commercial" else f"{bz}_physical_flow_data_bidding_zones.csv"
-        processed_table = f"processed_{flow_type}_flows" + ("_da" if dayahead else "")
-        
-        io.save(final_df, out_dir / filename, processed_table, config, bz=bz)
+        tablename = f"{bz}_comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones" if flow_type == "commercial" else f"{bz}_physical_flow_data_bidding_zones"
+        IOHandler.save(final_df, tablename, out_dir, config)
+        flow_dict[bz] = final_df
 
     return flow_dict
 
-def balance_flows_symmetry(data_dict: Dict[str, pd.DataFrame], config: PipelineConfig, io: DataIO, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
+def balance_flows_symmetry(data_dict: Dict[str, pd.DataFrame], config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
     """
     Enforces a bilateral symmetry constraint across the network matrix.
     Resolves reporting conflicts between neighboring zones using an availability-based reliability index.
@@ -421,8 +419,7 @@ def balance_flows_symmetry(data_dict: Dict[str, pd.DataFrame], config: PipelineC
             network_net_export_sum += df["Net Export"].sum()
         
         suffix = f"_{folder}.csv"
-        processed_table = f"processed_{flow_type}_flows" + ("_da" if dayahead else "")
-        io.save(df, out_dir / f"{bz}{suffix}", processed_table, config, bz=bz)
+        IOHandler.save(df, f"{bz}{suffix}", out_dir, config)
 
     logger.info(f"[Balance] Overall network Net Export sum: {network_net_export_sum:,.2f} MW")
 
@@ -494,7 +491,7 @@ def _download_GB_demand_data(date: pd.Timestamp) -> Optional[pd.DataFrame]:
         df.loc[data.index, "Actual Load"] = data["Quantity"].values
     return df
 
-def fetch_simple_metrics(client: EntsoePandasClient, config: PipelineConfig, io: DataIO) -> None:
+def fetch_simple_metrics(client: EntsoePandasClient, config: PipelineConfig) -> None:
     """Fetches Prices and Net Positions for Target Zones."""
     if not config.data_types["metrics"]: return
     
@@ -525,4 +522,4 @@ def fetch_simple_metrics(client: EntsoePandasClient, config: PipelineConfig, io:
                 df_resampled = df.resample("1h").mean(numeric_only=True)
                 
                 table_name = f"raw_{name}"
-                io.save(df_resampled, out_dir / f"{bz}_{name}.csv", table_name, config, bz=bz)
+                IOHandler.save(df_resampled, f"{bz}_{name}", out_dir, config)
