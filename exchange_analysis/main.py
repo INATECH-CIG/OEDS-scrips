@@ -34,6 +34,7 @@ from data_analysis import (
     perform_post_processing_aggregation
 )
 
+@flow
 def main():
     # ==========================================
     # CONTROL PANEL
