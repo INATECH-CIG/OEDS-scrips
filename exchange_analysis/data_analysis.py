@@ -70,7 +70,7 @@ def _load_if_missing(
         flow_dir = config.get_output_path("physical_flow_data_bidding_zones")
         phys_dfs = {}
         for bz in config.zones:
-            IOHandler.load(flow_dir / f"{bz}_raw_physical_flows.csv", config)
+            df = IOHandler.load(flow_dir / f"{bz}_raw_physical_flows.csv", config)
             if df is not None:
                 if "source_download_date" in df.columns and not hasattr(config, "analysis_source_date"):
                     config.analysis_source_date = str(df["source_download_date"].iloc[0]).split()[0]
