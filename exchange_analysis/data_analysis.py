@@ -14,8 +14,8 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Dict, Optional, Tuple, List, Any
-from config import PipelineConfig
-from utils import IOHandler
+from exchange_analysis.config import PipelineConfig
+from exchange_analysis.utils import IOHandler
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def _load_if_missing(
         gen_dir = config.get_output_path("generation_demand_data_bidding_zones")
         gen_dfs = {}
         for bz in config.zones:
-            df = IOHandler.load(gen_dir / f"{bz}_generation_demand.csv", config)
+            df = config.io.load(f"{bz}_generation_demand", config)
             if df is not None:
                 # Extract and synchronize global data vintage
                 if "source_download_date" in df.columns and not hasattr(config, "analysis_source_date"):
@@ -55,7 +55,7 @@ def _load_if_missing(
         comm_dir = config.get_output_path("comm_flow_total_bidding_zones")
         comm_dfs = {}
         for bz in config.zones:
-            df = IOHandler.load(comm_dir / f"{bz}_raw_commercial_flows.csv", config)
+            df = config.io.load(f"{bz}_comm_flow_total_bidding_zones", config)
             if df is not None:
                 if "source_download_date" in df.columns and not hasattr(config, "analysis_source_date"):
                     config.analysis_source_date = str(df["source_download_date"].iloc[0]).split()[0]
@@ -70,7 +70,7 @@ def _load_if_missing(
         flow_dir = config.get_output_path("physical_flow_data_bidding_zones")
         phys_dfs = {}
         for bz in config.zones:
-            df = IOHandler.load(flow_dir / f"{bz}_raw_physical_flows.csv", config)
+            df = config.io.load(f"{bz}_physical_flow_data_bidding_zones", config)
             if df is not None:
                 if "source_download_date" in df.columns and not hasattr(config, "analysis_source_date"):
                     config.analysis_source_date = str(df["source_download_date"].iloc[0]).split()[0]
@@ -118,8 +118,8 @@ def perform_decomposition_analysis(
             if f"{n}_{bz}" in comm_dfs_loaded[bz].columns: raw_total_imports[n] = comm_dfs_loaded[bz][f"{n}_{bz}"]
             if f"{bz}_{n}_netted_import" in comm_dfs_loaded[bz].columns: raw_netted_imports[n] = comm_dfs_loaded[bz][f"{bz}_{n}_netted_import"]
 
-        IOHandler.save(raw_total_imports, f"{bz}_import_comm_flow_total_per_bidding_zone",dirs["per_bidding_zone"] , config )
-        IOHandler.save(raw_netted_imports, f"{bz}_import_comm_flow_total_netted_per_bidding_zone", dirs["netted_per_bidding_zone"], config)
+        config.io.save(raw_total_imports, f"{bz}_import_comm_flow_total_per_bidding_zone",dirs["per_bidding_zone"] , config )
+        config.io.save(raw_netted_imports, f"{bz}_import_comm_flow_total_netted_per_bidding_zone", dirs["netted_per_bidding_zone"], config)
     logger.info("[Decomposition] Calculating generation mix fractions...")
     gen_fractions: Dict[str, pd.DataFrame] = {}
     for bz, df in gen_dfs_loaded.items():
@@ -155,8 +155,8 @@ def perform_decomposition_analysis(
         if total_imp_list:
             total_full = pd.concat(total_imp_list, axis=1)
             netted_full = pd.concat(netted_imp_list, axis=1)
-            IOHandler.save(total_full, f"{bz}_import_comm_flow_total_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"], config)
-            IOHandler.save(netted_full,  f"{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone", dirs["netted_per_type_per_bidding_zone"], config)
+            config.io.save(total_full, f"{bz}_import_comm_flow_total_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"], config)
+            config.io.save(netted_full,  f"{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone", dirs["netted_per_type_per_bidding_zone"], config)
 
             # Aggregate by specific technology type
             per_type = pd.DataFrame(index=config.time_index)
@@ -166,8 +166,8 @@ def perform_decomposition_analysis(
                 if cols_exact:
                     per_type[tech], per_type_net[tech] = total_full[cols_exact].sum(axis=1), netted_full[cols_exact].sum(axis=1)
 
-            IOHandler.save(per_type, f"{bz}_import_comm_flow_total_per_type", dirs["per_type"], config)
-            IOHandler.save(per_type_net, f"{bz}_import_comm_flow_total_netted_per_type", dirs["netted_per_type"], config)
+            config.io.save(per_type, f"{bz}_import_comm_flow_total_per_type", dirs["per_type"], config)
+            config.io.save(per_type_net, f"{bz}_import_comm_flow_total_netted_per_type", dirs["netted_per_type"], config)
             
             # Aggregate by broader categorical mappings (e.g., Fossil, Renewable)
             per_agg = pd.DataFrame(index=config.time_index)
@@ -176,8 +176,8 @@ def perform_decomposition_analysis(
                 valid = [t for t in techs if t in per_type.columns]
                 if valid: per_agg[cat], per_agg_net[cat] = per_type[valid].sum(axis=1), per_type_net[valid].sum(axis=1)
 
-            IOHandler.save(per_agg, f"{bz}_import_comm_flow_total_per_agg_type", dirs["per_agg_type"], config )
-            IOHandler.save(per_agg_net, f"{bz}_import_comm_flow_total_netted_per_agg_type", dirs["netted_per_agg_type"], config )
+            config.io.save(per_agg, f"{bz}_import_comm_flow_total_per_agg_type", dirs["per_agg_type"], config )
+            config.io.save(per_agg_net, f"{bz}_import_comm_flow_total_netted_per_agg_type", dirs["netted_per_agg_type"], config )
     logger.info("[Decomposition] Analysis Complete.")
 
 # ==========================================
@@ -218,7 +218,7 @@ def _decompose_and_save(
         if count % 5 == 0 or count == total_zones:
             logger.info(f"      [{count}/{total_zones}] Saving results for {bz}...")
             
-        IOHandler.save(traced_dfs[bz], f"{bz}_import_flow_tracing_{label}_per_bidding_zone",per_bz_dir, config,)
+        config.io.save(traced_dfs[bz], f"{bz}_import_flow_tracing_{label}_per_bidding_zone",per_bz_dir, config,)
         
         type_dfs: List[pd.DataFrame] = []
         for n in config.zones:
@@ -229,19 +229,19 @@ def _decompose_and_save(
         
         if type_dfs:
             full_type = pd.concat(type_dfs, axis=1)
-            IOHandler.save(full_type, f"{bz}_import_flow_tracing_{label}_per_type_per_bidding_zone", per_type_dir, config)
+            config.io.save(full_type, f"{bz}_import_flow_tracing_{label}_per_type_per_bidding_zone", per_type_dir, config)
             
             per_type = pd.DataFrame(index=config.time_index)
             for tech in config.gen_types_list:
                 cols_exact = [c for c in full_type.columns if c.split('_')[-1].strip() == tech]
                 if cols_exact: per_type[tech] = full_type[cols_exact].sum(axis=1)
-            IOHandler.save(per_type, f"{bz}_import_flow_tracing_{label}_per_type", per_type_total_dir, config)
+            config.io.save(per_type, f"{bz}_import_flow_tracing_{label}_per_type", per_type_total_dir, config)
             
             per_agg = pd.DataFrame(index=config.time_index)
             for cat, techs in agg_map.items():
                 valid = [t for t in techs if t in per_type.columns]
                 if valid: per_agg[cat] = per_type[valid].sum(axis=1)
-            IOHandler.save(per_agg, f"{bz}_import_flow_tracing_{label}_per_agg_type", per_agg_total_dir, config)
+            config.io.save(per_agg, f"{bz}_import_flow_tracing_{label}_per_agg_type", per_agg_total_dir, config)
             
     logger.info(f"[{label.upper()}] Save Complete.")
 
@@ -491,7 +491,7 @@ def perform_pooling_analysis(
             if count % 5 == 0 or count == total_zones:
                 logger.info(f"      [{count}/{total_zones}] Saving {bz}...")
                 
-            IOHandler.save(df_imp,f"{bz}_pooled_{file_p}_per_bidding_zone", dirs["per_bidding_zone"] , config )
+            config.io.save(df_imp,f"{bz}_pooled_{file_p}_per_bidding_zone", dirs["per_bidding_zone"] , config )
             
             type_dfs: List[pd.DataFrame] = []
             for src in [s for s in config.zones if s in df_imp.columns and s in gen_fractions]:
@@ -501,19 +501,19 @@ def perform_pooling_analysis(
             
             if type_dfs:
                 full = pd.concat(type_dfs, axis=1)
-                IOHandler.save(full, f"{bz}_pooled_{file_p}_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"] , config)
+                config.io.save(full, f"{bz}_pooled_{file_p}_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"] , config)
                 
                 per_type = pd.DataFrame(index=config.time_index)
                 for tech in config.gen_types_list:
                     cols_exact = [c for c in full.columns if c.split('_')[-1].strip() == tech]
                     if cols_exact: per_type[tech] = full[cols_exact].sum(axis=1)
-                IOHandler.save(per_type, f"{bz}_pooled_{file_p}_per_type", dirs["per_type"] , config)
+                config.io.save(per_type, f"{bz}_pooled_{file_p}_per_type", dirs["per_type"] , config)
                 
                 per_agg = pd.DataFrame(index=config.time_index)
                 for cat, techs in agg_map.items():
                     valid = [t for t in techs if t in per_type.columns]
                     if valid: per_agg[cat] = per_type[valid].sum(axis=1)
-                IOHandler.save(per_agg, f"{bz}_pooled_{file_p}_per_agg_type", dirs["per_agg_type"] , config)
+                config.io.save(per_agg, f"{bz}_pooled_{file_p}_per_agg_type", dirs["per_agg_type"] , config)
 
     # Construct system-wide export/import matrices for proportional allocation
     tot_exp = pd.DataFrame(index=config.time_index)
@@ -567,7 +567,7 @@ def perform_post_processing_aggregation(config: PipelineConfig) -> None:
     sub_outs = {k: totals_out / v for k,v in [("imp_bz", "import/per_bidding_zone"), ("exp_bz", "export/per_bidding_zone"), ("imp_type", "import/per_type"), ("exp_type", "export/per_type"), ("imp_agg", "import/per_agg_type")]}
 
     def load_clean(path: Any, table_prefix: str, bz: str, drop: Optional[str] = None) -> Optional[pd.DataFrame]:
-        df = IOHandler.load(path, config)
+        df = config.io.load(f"{bz}_{table_prefix}", config)
         if df is None: return None
         df = df.loc[:, ~df.columns.duplicated()].apply(pd.to_numeric, errors='coerce').fillna(0.0)
         if drop and drop in df.columns: df = df.drop(columns=[drop])
@@ -649,10 +649,10 @@ def perform_post_processing_aggregation(config: PipelineConfig) -> None:
         res_imp_type = res_imp_type.apply(pd.to_numeric, errors='coerce').fillna(0.0) / 1e6
         res_exp_type = res_exp_type.apply(pd.to_numeric, errors='coerce').fillna(0.0) / 1e6
         
-        IOHandler.save(res_imp_bz, f"{bz}_annual_totals_import_per_bidding_zone_{year}", sub_outs["imp_bz"], config)
-        IOHandler.save(res_exp_bz.T, f"{bz}_annual_totals_export_per_bidding_zone_{year}", sub_outs["exp_bz"], config)
-        IOHandler.save(res_imp_type.T, f"{bz}_annual_totals_import_per_type_{year}", sub_outs["imp_type"], config)
-        IOHandler.save(res_exp_type.T, f"{bz}_annual_totals_export_per_type_{year}", sub_outs["exp_type"], config)
+        config.io.save(res_imp_bz, f"{bz}_annual_totals_import_per_bidding_zone_{year}", sub_outs["imp_bz"], config)
+        config.io.save(res_exp_bz.T, f"{bz}_annual_totals_export_per_bidding_zone_{year}", sub_outs["exp_bz"], config)
+        config.io.save(res_imp_type.T, f"{bz}_annual_totals_import_per_type_{year}", sub_outs["imp_type"], config)
+        config.io.save(res_exp_type.T, f"{bz}_annual_totals_export_per_type_{year}", sub_outs["exp_type"], config)
         
         res_agg = pd.DataFrame(dtype=float)
         for m in res_imp_type.index:
@@ -660,6 +660,6 @@ def perform_post_processing_aggregation(config: PipelineConfig) -> None:
                 valid = [t for t in techs if t in res_imp_type.columns]
                 res_agg.loc[m, cat] = res_imp_type.loc[m, valid].sum()
         
-        IOHandler.save(res_agg.T, f"{bz}_annual_totals_import_per_agg_type_{year}", sub_outs["imp_agg"], config)
+        config.io.save(res_agg.T, f"{bz}_annual_totals_import_per_agg_type_{year}", sub_outs["imp_agg"], config)
 
     logger.info("Post-Processing Complete.")

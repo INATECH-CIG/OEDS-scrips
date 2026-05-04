@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 from dotenv import load_dotenv
+from utils import IOHandler
 
 # Resolve project root explicitly to guarantee localized environment variable discovery
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -46,7 +47,8 @@ class PipelineConfig:
         data_types: Optional[Dict[str, bool]] = None,
         debug_mode: bool = False,
         db_schema_name = None,
-        analysis_flags: Optional[Dict[str, bool]] = None
+        analysis_flags: Optional[Dict[str, bool]] = None,
+        io = None
     ):
         # ==========================================
         # DIRECTORY MAPPING
@@ -137,7 +139,12 @@ class PipelineConfig:
             self.target_zones = self.all_zones
 
         if self.debug_mode:
-            self.target_zones = self.target_zones[:3]
+            self.target_zones = self.target_zones[0:3]
+
+        if io is None:
+            self.io = IOHandler()
+        else:
+            self.io = io
 
         # ==========================================
         # CREDENTIALS & METADATA

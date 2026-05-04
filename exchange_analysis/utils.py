@@ -62,7 +62,7 @@ def _merge_gap_methods(df_target: pd.DataFrame, df_source: pd.DataFrame) -> None
 # ==========================================
 # DATA I/O HANDLER
 # ==========================================
-class IOHandler:
+class IOHandlerold:
     @staticmethod
     def save(df, tablename, directory,config):
         df = df.reset_index().rename(columns={"index": "time"})
@@ -99,6 +99,81 @@ class IOHandler:
 
             mask = (df.index >= config.start) & (df.index <= config.end)
             return df.loc[mask]
+
+class IOHandler:
+    def __init__(self):
+        self._tables = {}
+
+    def save(self, df, tablename, directory, config):
+        if df is None:
+            logger.info(f"Did not save anything for {tablename} because Dataframe is None")
+            return
+
+        df = df.copy()
+        df.index.name = "time"
+
+        is_result_table = tablename.startswith(
+            ("analysis_", "tracing_", "pool_", "annual_", "processed_")
+        )
+
+        if is_result_table:
+            date_val = getattr(
+                config,
+                "analysis_source_date",
+                pd.Timestamp.utcnow().strftime("%Y-%m-%d"),
+            )
+            df["source_download_date"] = date_val
+            meta_cols = ["gap_filling_method", "bidding_zone", "source_download_date"]
+        else:
+            df["download_timestamp"] = pd.Timestamp.utcnow().strftime(
+                "%Y-%m-%d %H:%M:%S UTC"
+            )
+            meta_cols = ["gap_filling_method", "bidding_zone", "download_timestamp"]
+
+        data_cols = [c for c in df.columns if c not in meta_cols]
+        present_meta = [c for c in meta_cols if c in df.columns]
+        df = df[data_cols + present_meta]
+
+        #save to timescale db
+        df_for_timescale = df.reset_index().rename(columns={"index": "time"})
+        df_for_timescale["time"] = pd.to_datetime(df_for_timescale["time"], utc=True, errors="coerce")
+        df_to_timescale(df_for_timescale, tablename, config.db_schema_name)
+
+        #save to csv file
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        df.to_csv(directory / f"{tablename}.csv", index=False)
+
+        #save in internal memory
+        self._tables[tablename] = df.copy()
+
+    def load(self, tablename, config):
+        if tablename in self._tables:
+            df = self._tables[tablename].copy()
+            df.index = pd.to_datetime(df.index, utc=True)
+
+            mask = (df.index >= config.start) & (df.index <= config.end)
+            return df.loc[mask]
+
+    # NEW: helper to fetch a table from internal runtime storage
+    def get_table(self, tablename, default=None):
+        return self._tables.get(tablename, default)
+
+    # NEW: helper to check if table exists in internal storage
+    def has_table(self, tablename):
+        return tablename in self._tables
+
+    # NEW: helper to list all table names in internal storage
+    def list_tables(self):
+        return list(self._tables.keys())
+
+    # NEW: helper to remove one table from internal storage
+    def delete_table(self, tablename):
+        self._tables.pop(tablename, None)
+
+    # NEW: helper to clear all runtime-stored tables
+    def clear_storage(self):
+        self._tables.clear()
 
 # ==========================================
 # LOGGING & API UTILS 
@@ -310,12 +385,9 @@ def patch_gaps_with_dayahead(
     if not long_gaps:
         return flow_df
 
-    folder = "comm_flow_dayahead_bidding_zones"
-    filename = f"{bz}_comm_flow_dayahead_bidding_zones.csv"
-    path = config.get_output_path(folder) / filename
     table_name = "processed_commercial_flows_da"
 
-    da_df = IOHandler.load(path, config)
+    da_df = config.io.load(f"{bz}_raw_commercial_flows_dayahead", config)
 
     if da_df is None or da_df.empty:
         return flow_df

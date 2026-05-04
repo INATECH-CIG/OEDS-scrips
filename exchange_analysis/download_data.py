@@ -18,8 +18,8 @@ from io import StringIO
 from pathlib import Path
 from typing import Dict, Optional
 from entsoe import EntsoePandasClient
-from config import PipelineConfig
-from utils import safe_query, fill_gaps_wrapper, correct_zero_values, _merge_gap_methods, IOHandler
+from exchange_analysis.config import PipelineConfig
+from exchange_analysis.utils import safe_query, fill_gaps_wrapper, correct_zero_values, _merge_gap_methods, IOHandler
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,8 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
             gen_df = safe_query(client.query_generation, context=f"Generation {bz}", country_code=bz, start=config.start, end=config.end, nett=True)
             load_df = safe_query(client.query_load, context=f"Load {bz}", country_code=bz, start=config.start, end=config.end)
 
-        IOHandler.save(gen_df, f"{bz}_raw_generation", raw_dir, config)
-        IOHandler.save(load_df, f"{bz}_raw_load", raw_dir, config)
+        config.io.save(gen_df, f"{bz}_raw_generation", raw_dir, config)
+        config.io.save(load_df, f"{bz}_raw_load", raw_dir, config)
 
 def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]:
     """
@@ -82,8 +82,8 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
         gen_path = raw_dir / f"{bz}_raw_generation.csv"
         load_path = raw_dir / f"{bz}_raw_load.csv"
         
-        gen_df = IOHandler.load(gen_path, config)
-        load_df = IOHandler.load(load_path, config)
+        gen_df = config.io.load(f"{bz}_raw_generation", config)
+        load_df = config.io.load(f"{bz}_raw_load", config)
 
         # Helper to extract the data vintage from either internal columns or OS file metadata
         def extract_vintage(df: Optional[pd.DataFrame], path: Path) -> None:
@@ -191,7 +191,7 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
 
     # Commit synchronized dataframes to designated IO channels
     for bz, final_df in gen_storage_dict.items():
-        IOHandler.save(final_df, f"{bz}_generation_demand",out_dir, config)
+        config.io.save(final_df, f"{bz}_generation_demand",out_dir, config)
 
     return gen_storage_dict
 
@@ -226,7 +226,7 @@ def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type
 
         if flow_df is not None: 
             table_name = f"{bz}_raw_{flow_type}_flows{'_dayahead' if dayahead else ''}"
-            IOHandler.save(flow_df, table_name, raw_dir, config)
+            config.io.save(flow_df, table_name, raw_dir, config)
 
 def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
     """
@@ -243,10 +243,10 @@ def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahea
     # PHASE 1: PROCESS AND COLLECT
     # ========================================================
     for bz in config.zones:
-        table_name = f"raw_{flow_type}_flows" + ("_da" if dayahead else "")
         flow_path = raw_dir / f"{bz}_raw_flows.csv"
 
-        df = IOHandler.load(flow_path, config)
+        df = config.io.load(f"{bz}_raw_{flow_type}_flows{'_dayahead' if dayahead else ''}", config)
+
         if df is not None: 
             # 1. Primary: Check internal columns for data lineage
             if "download_timestamp" in df.columns:
@@ -311,7 +311,7 @@ def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahea
     # Commit synchronized dataframes to designated IO channels
     for bz, final_df in flow_dict.items():
         tablename = f"{bz}_comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones" if flow_type == "commercial" else f"{bz}_physical_flow_data_bidding_zones"
-        IOHandler.save(final_df, tablename, out_dir, config)
+        config.io.save(final_df, tablename, out_dir, config)
         flow_dict[bz] = final_df
 
     return flow_dict
@@ -419,7 +419,7 @@ def balance_flows_symmetry(data_dict: Dict[str, pd.DataFrame], config: PipelineC
             network_net_export_sum += df["Net Export"].sum()
         
         suffix = f"_{folder}.csv"
-        IOHandler.save(df, f"{bz}{suffix}", out_dir, config)
+        config.io.save(df, f"{bz}{suffix}", out_dir, config)
 
     logger.info(f"[Balance] Overall network Net Export sum: {network_net_export_sum:,.2f} MW")
 
@@ -522,4 +522,4 @@ def fetch_simple_metrics(client: EntsoePandasClient, config: PipelineConfig) -> 
                 df_resampled = df.resample("1h").mean(numeric_only=True)
                 
                 table_name = f"raw_{name}"
-                IOHandler.save(df_resampled, f"{bz}_{name}", out_dir, config)
+                config.io.save(df_resampled, f"{bz}_{name}", out_dir, config)

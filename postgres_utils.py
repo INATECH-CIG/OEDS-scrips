@@ -121,8 +121,9 @@ def df_to_timescale(df, tablename, schema_name ='public'):
     else:
         query = sql.SQL("""
                         DELETE
-                        FROM {table}
+                        FROM {schema}.{table}
                         """).format(
+            schema=sql.Identifier(schema_name),
             table=sql.Identifier(tablename)
         )
 
