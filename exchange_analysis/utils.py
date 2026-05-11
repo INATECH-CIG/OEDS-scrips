@@ -62,43 +62,6 @@ def _merge_gap_methods(df_target: pd.DataFrame, df_source: pd.DataFrame) -> None
 # ==========================================
 # DATA I/O HANDLER
 # ==========================================
-class IOHandlerold:
-    @staticmethod
-    def save(df, tablename, directory,config):
-        df = df.reset_index().rename(columns={"index": "time"})
-
-        # Route metadata structures based on whether the data is raw extraction or downstream analysis
-        is_result_table = tablename.startswith(("analysis_", "tracing_", "pool_", "annual_", "processed_"))
-
-        if is_result_table:
-            date_val = getattr(config, 'analysis_source_date', pd.Timestamp.utcnow().strftime('%Y-%m-%d'))
-            df["source_download_date"] = date_val
-            meta_cols = ["gap_filling_method", "bidding_zone", "source_download_date"]
-        else:
-            df["download_timestamp"] = pd.Timestamp.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-            meta_cols = ["gap_filling_method", "bidding_zone", "download_timestamp"]
-
-        # Enforce column order to maintain tabular consistency
-        data_cols = [c for c in df.columns if c not in meta_cols]
-        present_meta = [c for c in meta_cols if c in df.columns]
-        df = df[data_cols + present_meta]
-
-        #save as csv
-        df_to_timescale(df,tablename, config.db_schema_name)
-
-        #save to timescale
-        Path(directory).mkdir(parents=True, exist_ok=True)
-        df.to_csv(directory / f"{tablename}.csv", index=False)
-
-    @staticmethod
-    def load(filepath, config):
-
-        if filepath.exists():
-            df = pd.read_csv(filepath, index_col=0)
-            df.index = pd.to_datetime(df.index, utc=True)
-
-            mask = (df.index >= config.start) & (df.index <= config.end)
-            return df.loc[mask]
 
 class IOHandler:
     def __init__(self):
@@ -134,46 +97,152 @@ class IOHandler:
         present_meta = [c for c in meta_cols if c in df.columns]
         df = df[data_cols + present_meta]
 
-        #save to timescale db
-        df_for_timescale = df.reset_index().rename(columns={"index": "time"})
-        df_for_timescale["time"] = pd.to_datetime(df_for_timescale["time"], utc=True, errors="coerce")
-        df_to_timescale(df_for_timescale, tablename, config.db_schema_name)
+        # IMPORTANT: Only save internally and as CSV, NO direct TimescaleDB push during download/processing
+        self._tables[tablename] = df.copy()
 
-        #save to csv file
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         df.to_csv(directory / f"{tablename}.csv", index=False)
-
-        #save in internal memory
-        self._tables[tablename] = df.copy()
 
     def load(self, tablename, config):
         if tablename in self._tables:
             df = self._tables[tablename].copy()
             df.index = pd.to_datetime(df.index, utc=True)
-
             mask = (df.index >= config.start) & (df.index <= config.end)
             return df.loc[mask]
+        return None
 
-    # NEW: helper to fetch a table from internal runtime storage
-    def get_table(self, tablename, default=None):
-        return self._tables.get(tablename, default)
+    def push_transformed_data_to_db(self, config):
+        """
+        Transforms the internally stored processed data and pushes it
+        once at the end into the new TimescaleDB tables in the configured schema.
+        """
+        logger.info("Starting transformation and push to TimescaleDB...")
 
-    # NEW: helper to check if table exists in internal storage
-    def has_table(self, tablename):
-        return tablename in self._tables
+        # 2. Retrieve schema name dynamically from config
+        schema_name = config.db_schema_name
 
-    # NEW: helper to list all table names in internal storage
-    def list_tables(self):
-        return list(self._tables.keys())
+        # 1. Cross Border Flows Bidding Zones
+        self._push_cross_border_flows(config, schema_name)
 
-    # NEW: helper to remove one table from internal storage
-    def delete_table(self, tablename):
-        self._tables.pop(tablename, None)
+        # 2. Zonal Generation Demand
+        self._push_zonal_generation_demand(config, schema_name)
 
-    # NEW: helper to clear all runtime-stored tables
-    def clear_storage(self):
-        self._tables.clear()
+        # 3. Market Price Dayahead
+        self._push_market_prices(config, schema_name)
+
+        logger.info("Transformation and DB push completed.")
+
+    def _push_cross_border_flows(self, config, schema_name):
+        logger.info("Transforming Cross Border Flows...")
+        flow_chunks = []
+
+        for bz in config.zones:
+            # Load dataframes
+            df_total = self._tables.get(f"{bz}_comm_flow_total_bidding_zones")
+            df_da = self._tables.get(f"{bz}_comm_flow_dayahead_bidding_zones")
+            df_phys = self._tables.get(f"{bz}_physical_flow_data_bidding_zones")
+
+            for n in config.neighbours_map.get(bz, []):
+                # Define collumn names
+                col = f"{bz}_{n}"
+                net_col = f"{col}_net_export"
+
+                # Regular flows (netted = false)
+                chunk_reg = pd.DataFrame(index=config.time_index)
+                chunk_reg['From Zone'] = bz
+                chunk_reg['To Zone'] = n
+                chunk_reg['Netted'] = False
+
+                if df_total is not None and col in df_total:
+                    chunk_reg['Comm Flow Total'] = df_total[col]
+                if df_da is not None and col in df_da:
+                    chunk_reg['Comm Flow Dayahead'] = df_da[col]
+                if df_phys is not None and col in df_phys:
+                    chunk_reg['Physical Flow'] = df_phys[col]
+
+                flow_chunks.append(chunk_reg)
+
+                # Netted flows (netted = True)
+                has_net_data = (df_total is not None and net_col in df_total) or \
+                               (df_da is not None and net_col in df_da) or \
+                               (df_phys is not None and net_col in df_phys)
+
+                if has_net_data:
+                    chunk_net = pd.DataFrame(index=config.time_index)
+                    chunk_net['From Zone'] = bz
+                    chunk_net['To Zone'] = n
+                    chunk_net['Netted'] = True
+
+                    if df_total is not None and net_col in df_total:
+                        chunk_net['Comm Flow Total'] = df_total[net_col]
+                    if df_da is not None and net_col in df_da:
+                        chunk_net['Comm Flow Dayahead'] = df_da[net_col]
+                    if df_phys is not None and net_col in df_phys:
+                        chunk_net['Physical Flow'] = df_phys[net_col]
+
+                    flow_chunks.append(chunk_net)
+
+        if flow_chunks:
+            # combine chunks
+            final_flows = pd.concat(flow_chunks).reset_index()
+
+            # rename time collumn for timescale
+            final_flows = final_flows.rename(columns={'index': 'time'})
+
+            # order collumns
+            ordered_cols = ['time', 'From Zone', 'To Zone', 'Netted', 'Comm Flow Total', 'Comm Flow Dayahead',
+                            'Physical Flow']
+            existing_ordered_cols = [c for c in ordered_cols if c in final_flows.columns]
+            final_flows = final_flows[existing_ordered_cols]
+
+            # push to database
+            df_to_timescale(final_flows, "Cross_Border_Flows_Bidding_Zones", schema_name)
+
+    def _push_zonal_generation_demand(self, config, schema_name):
+        logger.info("Transforming Zonal Generation Demand...")
+        gen_chunks = []
+
+        for bz in config.zones:
+            df_gen = self._tables.get(f"{bz}_generation_demand")
+            if df_gen is not None:
+                chunk = df_gen.copy()
+                chunk['zone'] = bz
+                gen_chunks.append(chunk)
+
+        if gen_chunks:
+            final_gen = pd.concat(gen_chunks).reset_index()
+            final_gen = final_gen.rename(columns={'index': 'time'})
+            # Clean up column names (remove spaces and brackets for SQL compatibility)
+            final_gen.columns = [c.replace(' ', '_').replace('(', '').replace(')', '') for c in final_gen.columns]
+
+            # 4. Ensure 'zone' is the second column right after 'time'
+            cols = list(final_gen.columns)
+            if 'zone' in cols:
+                cols.remove('zone')
+                cols.insert(1, 'zone')
+                final_gen = final_gen[cols]
+
+            df_to_timescale(final_gen, "Zonal_Generation_Demand", schema_name)
+
+    def _push_market_prices(self, config, schema_name):
+        logger.info("Transforming Market Price Dayahead...")
+        price_chunks = {}
+
+        for bz in config.zones:
+            df_price = self._tables.get(f"{bz}_market_price_dayahead")
+            if df_price is not None:
+                if 'Value' in df_price.columns:
+                    price_chunks[bz] = df_price['Value']
+                elif not df_price.empty:
+                    # Fallback if column name is different
+                    price_chunks[bz] = df_price.iloc[:, 0]
+
+        if price_chunks:
+            final_price = pd.DataFrame(price_chunks)
+            final_price = final_price.reset_index().rename(columns={'index': 'time'})
+            df_to_timescale(final_price, "Market_Price_Dayahead", schema_name)
+
 
 # ==========================================
 # LOGGING & API UTILS 
