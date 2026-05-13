@@ -78,12 +78,33 @@ def main():
         run_flags=my_run_flags,
         analysis_flags=analysis_subset,
         debug_mode=False,
-        db_schema_name= 'entsoe'
-
-        # Pass the optional variables here (Uncomment the variables in Step 4 to use them)
-        # target_zones=selected_bzs,
-        # data_types=selected_data_types
+        db_schema_name='entsoe-new-struct-5'
     )
+
+    # Set this to true only if you want to debug and load a pickled config object.
+    # This helps for debugging the analysis and post processing  because you can skip downloading in each run
+    # To create a pickled config object, comment in the pickle block at the end of the Phase 2 Block
+    use_pickle = False
+    if use_pickle:
+        import pickle
+        with open("ioHandler.pkl", "rb") as f:
+            io = pickle.load(f)
+
+        my_run_flags = {
+            "download": False,
+            "process": False,
+            "analysis": True,
+            "post_processing": True,
+        }
+
+
+        config = PipelineConfig(
+            date_range=period,
+            run_flags=my_run_flags,
+            analysis_flags=analysis_subset,
+            debug_mode=True,
+            db_schema_name= 'entsoe-new-struct-5',
+            io = io)
 
     # 7. Setup Logging
     timestamp = datetime.now().strftime("%Y-%m-%d")
@@ -131,7 +152,8 @@ def main():
 
         config.io.push_transformed_data_to_db(config)
 
-
+        #with open("ioHandler.pkl", "wb") as f:
+        #    pickle.dump(config.io, f)'''
 
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
