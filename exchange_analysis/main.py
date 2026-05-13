@@ -78,7 +78,7 @@ def main():
         run_flags=my_run_flags,
         analysis_flags=analysis_subset,
         debug_mode=False,
-        db_schema_name='entsoe-new-struct-5'
+        db_schema_name='entsoe'
     )
 
     # Set this to true only if you want to debug and load a pickled config object.
@@ -130,6 +130,8 @@ def main():
         download_flows(client, config, "physical")
         fetch_simple_metrics(client, config)
 
+        config.io.push_raw_data_to_db(config)
+
     # --- PHASE 2: PROCESS ---
     gen_data, final_comm, final_phys = None, None, None
     if config.run_phases["process"]:
@@ -150,10 +152,7 @@ def main():
         raw_phys = process_flows(config, "physical")
         final_phys = balance_flows_symmetry(raw_phys, config, "physical")
 
-        config.io.push_transformed_data_to_db(config)
-
-        #with open("ioHandler.pkl", "wb") as f:
-        #    pickle.dump(config.io, f)'''
+        config.io.push_proccessed_data_to_db(config)
 
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
@@ -173,6 +172,9 @@ def main():
     
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
+
+    # with open("ioHandler.pkl", "wb") as f:
+    #    pickle.dump(config.io, f)'''
 
 if __name__ == "__main__":
     main()

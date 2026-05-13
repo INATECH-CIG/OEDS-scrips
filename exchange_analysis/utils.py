@@ -112,6 +112,23 @@ class IOHandler:
             return df.loc[mask]
         return None
 
+    def push_raw_data_to_db(self, config):
+        """
+        Transforms the internally stored raw data and pushes it
+        into the new TimescaleDB tables in the configured schema.
+        """
+        logger.info("Starting transformation and push of raw data to TimescaleDB...")
+
+        schema_name = config.db_schema_name
+
+        # 1. Cross Border Flows Bidding Zones Raw
+        self._push_cross_border_flows(config, schema_name, raw=True)
+
+        # 2. Zonal Generation Demand Raw
+        self._push_zonal_generation_demand(config, schema_name, raw=True)
+
+        logger.info("Raw data transformation and DB push completed.")
+
     def push_transformed_data_to_db(self, config):
         """
         Transforms the internally stored processed data and pushes it
@@ -122,10 +139,10 @@ class IOHandler:
         schema_name = config.db_schema_name
 
         # 1. Cross Border Flows Bidding Zones
-        self._push_cross_border_flows(config, schema_name)
+        self._push_cross_border_flows(config, schema_name, raw=False)
 
         # 2. Zonal Generation Demand
-        self._push_zonal_generation_demand(config, schema_name)
+        self._push_zonal_generation_demand(config, schema_name, raw=False)
 
         # 3. Market Price Dayahead
         self._push_market_prices(config, schema_name)
@@ -138,12 +155,12 @@ class IOHandler:
     def _push_net_results(self, config) -> None:
         """
         Create and push the ``Net_Exports`` table.
-        The table aggregates the net‑export values from:
-          * Generation/Demand (Net Export)
-          * Commercial Flows Dayahead (Net Export)
-          * Commercial Flows Total (Net Export)
-          * Physical Flows (Net Export)
-          * SDAC net position (value column)
+        The table aggregates the net-export values from:
+        * Generation/Demand (Net Export)
+        * Commercial Flows Dayahead (Net Export)
+        * Commercial Flows Total (Net Export)
+        * Physical Flows (Net Export)
+        * SDAC net position (value column)
         The table is written to the same schema defined in the PipelineConfig.
         """
         logger.info("Creating & pushing Net_Exports table...")
@@ -209,19 +226,28 @@ class IOHandler:
         net_df = net_df[final_order]
 
         # Push to TimescaleDB
-        print(schema_name)
         df_to_timescale(net_df, "Net_Exports", schema_name)
         logger.info("Net_Exports table successfully pushed.")
 
-    def _push_cross_border_flows(self, config, schema_name):
-        logger.info("Transforming Cross Border Flows...")
+    def _push_cross_border_flows(self, config, schema_name, raw=False):
+        logger.info(f"Transforming Cross Border Flows {'Raw' if raw else 'Processed'}...")
         flow_chunks = []
 
         for bz in config.zones:
+            # Define keys based on raw flag
+            if raw:
+                total_key = f"{bz}_raw_commercial_flows"
+                da_key = f"{bz}_raw_commercial_flows_dayahead"
+                phys_key = f"{bz}_raw_physical_flows"
+            else:
+                total_key = f"{bz}_comm_flow_total_bidding_zones"
+                da_key = f"{bz}_comm_flow_dayahead_bidding_zones"
+                phys_key = f"{bz}_physical_flow_data_bidding_zones"
+
             # Load dataframes
-            df_total = self._tables.get(f"{bz}_comm_flow_total_bidding_zones")
-            df_da = self._tables.get(f"{bz}_comm_flow_dayahead_bidding_zones")
-            df_phys = self._tables.get(f"{bz}_physical_flow_data_bidding_zones")
+            df_total = self._tables.get(total_key)
+            df_da = self._tables.get(da_key)
+            df_phys = self._tables.get(phys_key)
 
             for n in config.neighbours_map.get(bz, []):
                 # Define collumn names
@@ -243,25 +269,26 @@ class IOHandler:
 
                 flow_chunks.append(chunk_reg)
 
-                # Netted flows (netted = True)
-                has_net_data = (df_total is not None and net_col in df_total) or \
-                               (df_da is not None and net_col in df_da) or \
-                               (df_phys is not None and net_col in df_phys)
+                # Netted flows (netted = True) - only applicable for processed data
+                if not raw:
+                    has_net_data = (df_total is not None and net_col in df_total) or \
+                                   (df_da is not None and net_col in df_da) or \
+                                   (df_phys is not None and net_col in df_phys)
 
-                if has_net_data:
-                    chunk_net = pd.DataFrame(index=config.time_index)
-                    chunk_net['From Zone'] = bz
-                    chunk_net['To Zone'] = n
-                    chunk_net['Netted'] = True
+                    if has_net_data:
+                        chunk_net = pd.DataFrame(index=config.time_index)
+                        chunk_net['From Zone'] = bz
+                        chunk_net['To Zone'] = n
+                        chunk_net['Netted'] = True
 
-                    if df_total is not None and net_col in df_total:
-                        chunk_net['Comm Flow Total'] = df_total[net_col]
-                    if df_da is not None and net_col in df_da:
-                        chunk_net['Comm Flow Dayahead'] = df_da[net_col]
-                    if df_phys is not None and net_col in df_phys:
-                        chunk_net['Physical Flow'] = df_phys[net_col]
+                        if df_total is not None and net_col in df_total:
+                            chunk_net['Comm Flow Total'] = df_total[net_col]
+                        if df_da is not None and net_col in df_da:
+                            chunk_net['Comm Flow Dayahead'] = df_da[net_col]
+                        if df_phys is not None and net_col in df_phys:
+                            chunk_net['Physical Flow'] = df_phys[net_col]
 
-                    flow_chunks.append(chunk_net)
+                        flow_chunks.append(chunk_net)
 
         if flow_chunks:
             # combine chunks
@@ -273,22 +300,38 @@ class IOHandler:
             # order collumns
             ordered_cols = ['time', 'From Zone', 'To Zone', 'Netted', 'Comm Flow Total', 'Comm Flow Dayahead',
                             'Physical Flow']
+
+            if raw:
+                ordered_cols.remove('Netted')
+
             existing_ordered_cols = [c for c in ordered_cols if c in final_flows.columns]
             final_flows = final_flows[existing_ordered_cols]
 
             # push to database
-            df_to_timescale(final_flows, "Cross_Border_Flows_Bidding_Zones", schema_name)
+            table_name = "Cross_Border_Flows_Bidding_Zones_Raw" if raw else "Cross_Border_Flows_Bidding_Zones"
+            df_to_timescale(final_flows, table_name, schema_name)
 
-    def _push_zonal_generation_demand(self, config, schema_name):
-        logger.info("Transforming Zonal Generation Demand...")
+    def _push_zonal_generation_demand(self, config, schema_name, raw=False):
+        logger.info(f"Transforming Zonal Generation Demand {'Raw' if raw else 'Processed'}...")
         gen_chunks = []
 
         for bz in config.zones:
-            df_gen = self._tables.get(f"{bz}_generation_demand")
-            if df_gen is not None:
-                chunk = df_gen.copy()
-                chunk['zone'] = bz
-                gen_chunks.append(chunk)
+            if raw:
+                df_gen = self._tables.get(f"{bz}_raw_generation")
+                df_load = self._tables.get(f"{bz}_raw_load")
+                if df_gen is not None or df_load is not None:
+                    # Combine generation and load data, drop duplicate columns if they overlap
+                    dfs_to_concat = [df for df in [df_gen, df_load] if df is not None]
+                    chunk = pd.concat(dfs_to_concat, axis=1)
+                    chunk = chunk.loc[:, ~chunk.columns.duplicated()]
+                    chunk['zone'] = bz
+                    gen_chunks.append(chunk)
+            else:
+                df_gen = self._tables.get(f"{bz}_generation_demand")
+                if df_gen is not None:
+                    chunk = df_gen.copy()
+                    chunk['zone'] = bz
+                    gen_chunks.append(chunk)
 
         if gen_chunks:
             final_gen = pd.concat(gen_chunks).reset_index()
@@ -303,7 +346,21 @@ class IOHandler:
                 cols.insert(1, 'zone')
                 final_gen = final_gen[cols]
 
-            df_to_timescale(final_gen, "Zonal_Generation_Demand", schema_name)
+
+            if not raw:
+                # Ensure 'gap_filling_method' and 'download_timestamp' are the last 2 columns
+                for col in ['gap_filling_method', 'download_timestamp']:
+                    if col in cols:
+                        cols.remove(col)
+                if 'gap_filling_method' in final_gen.columns:
+                    cols.append('gap_filling_method')
+                if 'download_timestamp' in final_gen.columns:
+                    cols.append('download_timestamp')
+                final_gen = final_gen[cols]
+
+            table_name = "Zonal_Generation_Demand_Raw" if raw else "Zonal_Generation_Demand"
+            final_gen['time'] = pd.to_datetime(final_gen['time'], utc=True)
+            df_to_timescale(final_gen, table_name, schema_name)
 
     def _push_market_prices(self, config, schema_name):
         logger.info("Transforming Market Price Dayahead...")
