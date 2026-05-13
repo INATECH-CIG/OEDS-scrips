@@ -119,7 +119,6 @@ class IOHandler:
         """
         logger.info("Starting transformation and push to TimescaleDB...")
 
-        # 2. Retrieve schema name dynamically from config
         schema_name = config.db_schema_name
 
         # 1. Cross Border Flows Bidding Zones

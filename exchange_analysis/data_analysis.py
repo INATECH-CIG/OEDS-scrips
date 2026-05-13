@@ -35,7 +35,6 @@ def _load_if_missing(
     """
     if gen_dfs is None:
         logger.info("Loading Gen data...")
-        gen_dir = config.get_output_path("generation_demand_data_bidding_zones")
         gen_dfs = {}
         for bz in config.zones:
             df = config.io.load(f"{bz}_generation_demand", config)
