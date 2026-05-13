@@ -373,7 +373,7 @@ def perform_direct_flow_tracing(
             exports: float = 0.0
             
             # Extract absolute generation and load, defaulting to 0.0 for missing temporal indices
-            if t in gen_dfs_loaded[bz].index:
+            if bz in gen_dfs_loaded and t in gen_dfs_loaded[bz].index:
                 gen_val = float(gen_dfs_loaded[bz].at[t, "Total Generation"])
                 load_val = float(gen_dfs_loaded[bz].at[t, "Total Load"])
             else:
