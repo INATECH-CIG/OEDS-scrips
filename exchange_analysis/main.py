@@ -129,6 +129,10 @@ def main():
         raw_phys = process_flows(config, "physical")
         final_phys = balance_flows_symmetry(raw_phys, config, "physical")
 
+        config.io.push_transformed_data_to_db(config)
+
+
+
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
         logger.info("\n=== STARTING ANALYSIS ===")

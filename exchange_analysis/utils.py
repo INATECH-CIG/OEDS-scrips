@@ -130,9 +130,12 @@ class IOHandler:
         # 3. Market Price Dayahead
         self._push_market_prices(config, schema_name)
 
+        # 4. Net Exports
+        self._push_net_results(config)
+
         logger.info("Transformation and DB push completed.")
 
-    def push_net_results(self, config) -> None:
+    def _push_net_results(self, config) -> None:
         """
         Create and push the ``Net_Exports`` table.
         The table aggregates the net‑export values from:
