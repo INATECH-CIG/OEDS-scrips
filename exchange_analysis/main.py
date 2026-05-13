@@ -148,5 +148,7 @@ def main():
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
 
+    config.io.push_net_results(config)
+
 if __name__ == "__main__":
     main()

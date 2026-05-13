@@ -132,6 +132,84 @@ class IOHandler:
 
         logger.info("Transformation and DB push completed.")
 
+    def push_net_results(self, config) -> None:
+        """
+        Create and push the ``Net_Exports`` table.
+        The table aggregates the net‑export values from:
+          * Generation/Demand (Net Export)
+          * Commercial Flows Dayahead (Net Export)
+          * Commercial Flows Total (Net Export)
+          * Physical Flows (Net Export)
+          * SDAC net position (value column)
+        The table is written to the same schema defined in the PipelineConfig.
+        """
+        logger.info("Creating & pushing Net_Exports table...")
+        schema_name = config.db_schema_name
+
+        # Helper: safely extract a column, returning a Series of NaNs when missing
+        def _extract(col_df: Optional[pd.DataFrame], col_name: str) -> pd.Series:
+            if col_df is None:
+                return pd.Series([np.nan] * len(config.time_index), index=config.time_index)
+            # Accept both "Net_Export" and "Net Export"
+            if col_name in col_df.columns:
+                return col_df[col_name]
+            alt = col_name.replace('_', ' ')
+            if alt in col_df.columns:
+                return col_df[alt]
+            return pd.Series([np.nan] * len(col_df), index=col_df.index)
+
+        net_chunks = []  # one row per zone per timestamp
+        for bz in config.zones:
+            # Base row (time + bidding zone)
+            base = pd.DataFrame(index=config.time_index)
+            base["time"] = config.time_index
+            base["bidding_zone"] = bz
+
+            # 1. Generation/Demand Net Export
+            gen_df = self._tables.get(f"{bz}_generation_demand")
+            base["generation_demand_net_export"] = _extract(gen_df, "Net_Export")
+
+            # 2. Commercial Flows Dayahead Net Export
+            comm_da_df = self._tables.get(f"{bz}_comm_flow_dayahead_bidding_zones")
+            base["commercial_flows_dayahead_net_export"] = _extract(comm_da_df, "Net_Export")
+
+            # 3. Commercial Flows Total Net Export
+            comm_tot_df = self._tables.get(f"{bz}_comm_flow_total_bidding_zones")
+            base["commercial_flows_total_net_export"] = _extract(comm_tot_df, "Net_Export")
+
+            # 4. Physical Flows Net Export
+            phys_df = self._tables.get(f"{bz}_physical_flow_data_bidding_zones")
+            base["physical_flows_net_export"] = _extract(phys_df, "Net_Export")
+
+            # 5. SDAC Net Position (column named "value")
+            sdac_df = self._tables.get(f"{bz}_net_positions_dayahead")
+            if sdac_df is not None and "Value" in sdac_df.columns:
+                base["sdac_net_position"] = sdac_df["Value"]
+            else:
+                base["sdac_net_position"] = np.nan
+
+            net_chunks.append(base)
+
+        # Concatenate all zones
+        net_df = pd.concat(net_chunks, ignore_index=True)
+
+        # Ensure correct column order
+        final_order = [
+            "time",
+            "bidding_zone",
+            "generation_demand_net_export",
+            "commercial_flows_dayahead_net_export",
+            "commercial_flows_total_net_export",
+            "physical_flows_net_export",
+            "sdac_net_position",
+        ]
+        net_df = net_df[final_order]
+
+        # Push to TimescaleDB
+        print(schema_name)
+        df_to_timescale(net_df, "Net_Exports", schema_name)
+        logger.info("Net_Exports table successfully pushed.")
+
     def _push_cross_border_flows(self, config, schema_name):
         logger.info("Transforming Cross Border Flows...")
         flow_chunks = []
