@@ -250,7 +250,7 @@ class IOHandler:
             df_phys = self._tables.get(phys_key)
 
             for n in config.neighbours_map.get(bz, []):
-                # Define collumn names
+                # Define column names
                 col = f"{bz}_{n}"
                 net_col = f"{col}_net_export"
 
@@ -262,10 +262,15 @@ class IOHandler:
 
                 if df_total is not None and col in df_total:
                     chunk_reg['Comm Flow Total'] = df_total[col]
+                    chunk_reg['Gap Filling (Comm Flow Total)'] = df_total['gap_filling_method']
+
                 if df_da is not None and col in df_da:
                     chunk_reg['Comm Flow Dayahead'] = df_da[col]
+                    chunk_reg['Gap Filling (Comm Flow Dayahead)'] = df_da['gap_filling_method']
+
                 if df_phys is not None and col in df_phys:
                     chunk_reg['Physical Flow'] = df_phys[col]
+                    chunk_reg['Gap Filling (Physical Flow)'] = df_phys['gap_filling_method']
 
                 flow_chunks.append(chunk_reg)
 
@@ -283,10 +288,15 @@ class IOHandler:
 
                         if df_total is not None and net_col in df_total:
                             chunk_net['Comm Flow Total'] = df_total[net_col]
+                            chunk_net['Gap Filling (Comm Flow Total)'] = df_total['gap_filling_method']
+
                         if df_da is not None and net_col in df_da:
                             chunk_net['Comm Flow Dayahead'] = df_da[net_col]
+                            chunk_net['Gap Filling (Comm Flow Dayahead)'] = df_da['gap_filling_method']
+
                         if df_phys is not None and net_col in df_phys:
                             chunk_net['Physical Flow'] = df_phys[net_col]
+                            chunk_net['Gap Filling (Physical Flow)'] = df_phys['gap_filling_method']
 
                         flow_chunks.append(chunk_net)
 
@@ -297,12 +307,23 @@ class IOHandler:
             # rename time collumn for timescale
             final_flows = final_flows.rename(columns={'index': 'time'})
 
-            # order collumns
-            ordered_cols = ['time', 'From Zone', 'To Zone', 'Netted', 'Comm Flow Total', 'Comm Flow Dayahead',
-                            'Physical Flow']
+            # Updated column order to include the Gap Filling columns
+            ordered_cols = [
+                'time',
+                'From Zone',
+                'To Zone',
+                'Netted',
+                'Comm Flow Total',
+                'Comm Flow Dayahead',
+                'Physical Flow', 'Gap Filling (Comm Flow Total)',
+                'Gap Filling (Comm Flow Dayahead)',
+                'Gap Filling (Physical Flow)'
+            ]
 
             if raw:
-                ordered_cols.remove('Netted')
+                # If raw data doesn't have a 'Netted' concept, remove it from the order
+                if 'Netted' in ordered_cols:
+                    ordered_cols.remove('Netted')
 
             existing_ordered_cols = [c for c in ordered_cols if c in final_flows.columns]
             final_flows = final_flows[existing_ordered_cols]
