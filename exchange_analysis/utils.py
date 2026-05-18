@@ -232,9 +232,7 @@ class IOHandler:
     def _push_cross_border_flows(self, config, schema_name, raw=False):
         logger.info(f"Transforming Cross Border Flows {'Raw' if raw else 'Processed'}...")
         flow_chunks = []
-
         for bz in config.zones:
-            # Define keys based on raw flag
             if raw:
                 total_key = f"{bz}_raw_commercial_flows"
                 da_key = f"{bz}_raw_commercial_flows_dayahead"
@@ -244,13 +242,11 @@ class IOHandler:
                 da_key = f"{bz}_comm_flow_dayahead_bidding_zones"
                 phys_key = f"{bz}_physical_flow_data_bidding_zones"
 
-            # Load dataframes
             df_total = self._tables.get(total_key)
             df_da = self._tables.get(da_key)
             df_phys = self._tables.get(phys_key)
 
             for n in config.neighbours_map.get(bz, []):
-                # Define column names
                 col = f"{bz}_{n}"
                 net_col = f"{col}_net_export"
 
@@ -262,19 +258,21 @@ class IOHandler:
 
                 if df_total is not None and col in df_total:
                     chunk_reg['Comm Flow Total'] = df_total[col]
-                    chunk_reg['Gap Filling (Comm Flow Total)'] = df_total['gap_filling_method']
+                    chunk_reg['Gap Filling (Comm Flow Total)'] = df_total.get('gap_filling_method', np.nan)
+                    chunk_reg['Download Time (Comm Flow Total)'] = df_total.get('download_timestamp', np.nan)
 
                 if df_da is not None and col in df_da:
                     chunk_reg['Comm Flow Dayahead'] = df_da[col]
-                    chunk_reg['Gap Filling (Comm Flow Dayahead)'] = df_da['gap_filling_method']
+                    chunk_reg['Gap Filling (Comm Flow Dayahead)'] = df_da.get('gap_filling_method', np.nan)
+                    chunk_reg['Download Time (Comm Flow Dayahead)'] = df_da.get('download_timestamp', np.nan)
 
                 if df_phys is not None and col in df_phys:
                     chunk_reg['Physical Flow'] = df_phys[col]
-                    chunk_reg['Gap Filling (Physical Flow)'] = df_phys['gap_filling_method']
+                    chunk_reg['Gap Filling (Physical Flow)'] = df_phys.get('gap_filling_method', np.nan)
+                    chunk_reg['Download Time (Physical Flow)'] = df_phys.get('download_timestamp', np.nan)
 
                 flow_chunks.append(chunk_reg)
 
-                # Netted flows (netted = True) - only applicable for processed data
                 if not raw:
                     has_net_data = (df_total is not None and net_col in df_total) or \
                                    (df_da is not None and net_col in df_da) or \
@@ -288,49 +286,53 @@ class IOHandler:
 
                         if df_total is not None and net_col in df_total:
                             chunk_net['Comm Flow Total'] = df_total[net_col]
-                            chunk_net['Gap Filling (Comm Flow Total)'] = df_total['gap_filling_method']
+                            chunk_net['Gap Filling (Comm Flow Total)'] = df_total.get('gap_filling_method', np.nan)
+                            chunk_net['Download Time (Comm Flow Total)'] = df_total.get('download_timestamp', np.nan)
 
                         if df_da is not None and net_col in df_da:
                             chunk_net['Comm Flow Dayahead'] = df_da[net_col]
-                            chunk_net['Gap Filling (Comm Flow Dayahead)'] = df_da['gap_filling_method']
+                            chunk_net['Gap Filling (Comm Flow Dayahead)'] = df_da.get('gap_filling_method', np.nan)
+                            chunk_net['Download Time (Comm Flow Dayahead)'] = df_da.get('download_timestamp', np.nan)
 
                         if df_phys is not None and net_col in df_phys:
                             chunk_net['Physical Flow'] = df_phys[net_col]
-                            chunk_net['Gap Filling (Physical Flow)'] = df_phys['gap_filling_method']
+                            chunk_net['Gap Filling (Physical Flow)'] = df_phys.get('gap_filling_method', np.nan)
+                            chunk_net['Download Time (Physical Flow)'] = df_phys.get('download_timestamp', np.nan)
 
                         flow_chunks.append(chunk_net)
 
-        if flow_chunks:
-            # combine chunks
-            final_flows = pd.concat(flow_chunks).reset_index()
+        if not flow_chunks:
+            return
 
-            # rename time collumn for timescale
-            final_flows = final_flows.rename(columns={'index': 'time'})
+        final_flows = pd.concat(flow_chunks).reset_index().rename(columns={'index': 'time'})
 
-            # Updated column order to include the Gap Filling columns
-            ordered_cols = [
-                'time',
-                'From Zone',
-                'To Zone',
-                'Netted',
-                'Comm Flow Total',
-                'Comm Flow Dayahead',
-                'Physical Flow', 'Gap Filling (Comm Flow Total)',
-                'Gap Filling (Comm Flow Dayahead)',
-                'Gap Filling (Physical Flow)'
-            ]
+        # Updated column order to include both Gap Filling and Download Time
+        ordered_cols = [
+            'time',
+            'From Zone',
+            'To Zone',
+            'Netted',
+            'Comm Flow Total',
+            'Comm Flow Dayahead',
+            'Physical Flow',
 
-            if raw:
-                # If raw data doesn't have a 'Netted' concept, remove it from the order
-                if 'Netted' in ordered_cols:
-                    ordered_cols.remove('Netted')
+            'Gap Filling (Comm Flow Total)',
+            'Gap Filling (Comm Flow Dayahead)',
+            'Gap Filling (Physical Flow)',
 
-            existing_ordered_cols = [c for c in ordered_cols if c in final_flows.columns]
-            final_flows = final_flows[existing_ordered_cols]
+            'Download Time (Physical Flow)',
+            'Download Time (Comm Flow Total)',
+            'Download Time (Comm Flow Dayahead)',
+        ]
 
-            # push to database
-            table_name = "Cross_Border_Flows_Bidding_Zones_Raw" if raw else "Cross_Border_Flows_Bidding_Zones"
-            df_to_timescale(final_flows, table_name, schema_name)
+        if raw and 'Netted' in ordered_cols:
+            ordered_cols.remove('Netted')
+
+        existing_ordered_cols = [c for c in ordered_cols if c in final_flows.columns]
+        final_flows = final_flows[existing_ordered_cols]
+
+        table_name = "Cross_Border_Flows_Bidding_Zones_Raw" if raw else "Cross_Border_Flows_Bidding_Zones"
+        df_to_timescale(final_flows, table_name, schema_name)
 
     def _push_zonal_generation_demand(self, config, schema_name, raw=False):
         logger.info(f"Transforming Zonal Generation Demand {'Raw' if raw else 'Processed'}...")
@@ -383,26 +385,38 @@ class IOHandler:
             final_gen['time'] = pd.to_datetime(final_gen['time'], utc=True)
             df_to_timescale(final_gen, table_name, schema_name)
 
+
     def _push_market_prices(self, config, schema_name):
         logger.info("Transforming Market Price Dayahead...")
         price_chunks = {}
+        timestamp_chunks = {}  # Dictionary to hold timestamps per zone
 
         for bz in config.zones:
             df_price = self._tables.get(f"{bz}_market_price_dayahead")
             if df_price is not None:
+                # Extract Price Value
                 if 'Value' in df_price.columns:
                     price_chunks[bz] = df_price['Value']
                 elif not df_price.empty:
-                    # Fallback if column name is different
                     price_chunks[bz] = df_price.iloc[:, 0]
 
+                # Extract Download Timestamp for this specific zone
+                if 'download_timestamp' in df_price.columns:
+                    timestamp_chunks[bz] = df_price['download_timestamp']
+                else:
+                    timestamp_chunks[bz] = pd.Series([np.nan] * len(df_price), index=df_price.index)
+
         if price_chunks:
+            # Create the main price DataFrame
             final_price = pd.DataFrame(price_chunks)
+            final_price.columns = final_price.columns.str.upper()
+
+            # Add the Download Time columns for each zone
+            for bz, ts_series in timestamp_chunks.items():
+                final_price[f"Download Time ({bz.upper()})"] = ts_series
+
             final_price = final_price.reset_index().rename(columns={'index': 'time'})
-            df_to_timescale(final_price, "Market_Price_Dayahead", schema_name)
-
-
-# ==========================================
+            df_to_timescale(final_price, "Market_Price_Dayahead", schema_name)# ==========================================
 # LOGGING & API UTILS 
 # ==========================================
 def setup_logging(log_file_path: Path, log_level_str: str, debug_mode: bool) -> None:
