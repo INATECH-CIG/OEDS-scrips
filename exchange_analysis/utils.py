@@ -129,7 +129,7 @@ class IOHandler:
 
         logger.info("Raw data transformation and DB push completed.")
 
-    def push_transformed_data_to_db(self, config):
+    def push_processed_data_to_db(self, config):
         """
         Transforms the internally stored processed data and pushes it
         once at the end into the new TimescaleDB tables in the configured schema.
