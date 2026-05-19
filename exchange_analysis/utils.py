@@ -64,8 +64,9 @@ def _merge_gap_methods(df_target: pd.DataFrame, df_source: pd.DataFrame) -> None
 # ==========================================
 
 class IOHandler:
-    def __init__(self):
+    def __init__(self, save_csv=False):
         self._tables = {}
+        self.save_csv = save_csv
 
     def save(self, df, tablename, directory, config):
         if df is None:
@@ -100,9 +101,10 @@ class IOHandler:
         # IMPORTANT: Only save internally and as CSV, NO direct TimescaleDB push during download/processing
         self._tables[tablename] = df.copy()
 
-        directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        df.to_csv(directory / f"{tablename}.csv", index=False)
+        if self.save_csv:
+            directory = Path(directory)
+            directory.mkdir(parents=True, exist_ok=True)
+            df.to_csv(directory / f"{tablename}.csv", index=False)
 
     def load(self, tablename, config):
         if tablename in self._tables:
