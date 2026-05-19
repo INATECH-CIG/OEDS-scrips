@@ -176,8 +176,5 @@ def main():
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
 
-    # with open("ioHandler.pkl", "wb") as f:
-    #    pickle.dump(config.io, f)'''
-
 if __name__ == "__main__":
     main()
