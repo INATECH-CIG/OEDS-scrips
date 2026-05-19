@@ -169,6 +169,8 @@ def main():
         
         if config.analysis_flags["pooling_analysis"]:
             perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
+
+        config.io.push_analysis_data(config)
     
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
