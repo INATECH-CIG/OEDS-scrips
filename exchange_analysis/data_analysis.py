@@ -15,7 +15,6 @@ import numpy as np
 import logging
 from typing import Dict, Optional, Tuple, List, Any
 from exchange_analysis.config import PipelineConfig
-from exchange_analysis.utils import IOHandler
 
 
 logger = logging.getLogger(__name__)
