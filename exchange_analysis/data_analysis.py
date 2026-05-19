@@ -478,7 +478,7 @@ def perform_pooling_analysis(
     agg_map = config.gen_types_df.groupby(['converted'])['entsoe'].apply(list).to_dict()
     base_pool = config.output_dir / "pooling" / str(config.year)
 
-    def save_pool(pooled_dict: Dict[str, pd.DataFrame], name: str, file_p: str) -> None:
+    def save_pool(pooled_dict: Dict[str, pd.DataFrame], name: str) -> None:
         logger.info(f"   -> Saving results for method: {name}")
         dirs = {k: base_pool / name / k for k in ["per_bidding_zone", "per_type_per_bidding_zone", "per_type", "per_agg_type"]}
         
@@ -489,9 +489,9 @@ def perform_pooling_analysis(
             count += 1
             if count % 5 == 0 or count == total_zones:
                 logger.info(f"      [{count}/{total_zones}] Saving {bz}...")
-                
-            config.io.save(df_imp,f"{bz}_pooled_{file_p}_per_bidding_zone", dirs["per_bidding_zone"] , config )
-            
+
+            config.io.save(df_imp, f"{bz}_pooled_{name}_per_bidding_zone", dirs["per_bidding_zone"], config)
+
             type_dfs: List[pd.DataFrame] = []
             for src in [s for s in config.zones if s in df_imp.columns and s in gen_fractions]:
                 t = gen_fractions[src].mul(df_imp[src], axis=0)
@@ -500,19 +500,19 @@ def perform_pooling_analysis(
             
             if type_dfs:
                 full = pd.concat(type_dfs, axis=1)
-                config.io.save(full, f"{bz}_pooled_{file_p}_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"] , config)
+                config.io.save(full, f"{bz}_pooled_{name}_per_type_per_bidding_zone", dirs["per_type_per_bidding_zone"] , config)
                 
                 per_type = pd.DataFrame(index=config.time_index)
                 for tech in config.gen_types_list:
                     cols_exact = [c for c in full.columns if c.split('_')[-1].strip() == tech]
                     if cols_exact: per_type[tech] = full[cols_exact].sum(axis=1)
-                config.io.save(per_type, f"{bz}_pooled_{file_p}_per_type", dirs["per_type"] , config)
+                config.io.save(per_type, f"{bz}_pooled_{name}_per_type", dirs["per_type"] , config)
                 
                 per_agg = pd.DataFrame(index=config.time_index)
                 for cat, techs in agg_map.items():
                     valid = [t for t in techs if t in per_type.columns]
                     if valid: per_agg[cat] = per_type[valid].sum(axis=1)
-                config.io.save(per_agg, f"{bz}_pooled_{file_p}_per_agg_type", dirs["per_agg_type"] , config)
+                config.io.save(per_agg, f"{bz}_pooled_{name}_per_agg_type", dirs["per_agg_type"] , config)
 
     # Construct system-wide export/import matrices for proportional allocation
     tot_exp = pd.DataFrame(index=config.time_index)
@@ -533,13 +533,15 @@ def perform_pooling_analysis(
             p_exp[bz], p_imp[bz] = v_p.clip(lower=0), v_p.clip(upper=0).abs()
 
     logger.info("[Pooling] 2/4: Calculating Commercial Link-Based Mix...")
-    save_pool({bz: tot_exp.div(tot_exp.sum(axis=1).replace(0, 1), axis=0).mul(tot_imp[bz], axis=0) for bz in config.zones if bz in tot_imp}, "commercial_link_based", "imports")
-    
+    save_pool({bz: tot_exp.div(tot_exp.sum(axis=1).replace(0, 1), axis=0).mul(tot_imp[bz], axis=0) for bz in config.zones if bz in tot_imp}, "commercial_link_based")
+
+
     logger.info("[Pooling] 3/4: Calculating Commercial Net Position Mix...")
-    save_pool({bz: net_exp.div(net_exp.sum(axis=1).replace(0, 1), axis=0).mul(net_imp[bz], axis=0) for bz in config.zones if bz in net_imp}, "commercial_net_pos", "net_imports")
-    
+    save_pool({bz: net_exp.div(net_exp.sum(axis=1).replace(0, 1), axis=0).mul(net_imp[bz], axis=0) for bz in config.zones if bz in net_imp}, "commercial_net_pos")
+
+
     logger.info("[Pooling] 4/4: Calculating Physical Net Position Mix...")
-    save_pool({bz: p_exp.div(p_exp.sum(axis=1).replace(0, 1), axis=0).mul(p_imp[bz], axis=0) for bz in config.zones if bz in p_imp}, "physical_net_pos", "net_imports")
+    save_pool({bz: p_exp.div(p_exp.sum(axis=1).replace(0, 1), axis=0).mul(p_imp[bz], axis=0) for bz in config.zones if bz in p_imp}, "physical_net_pos")
     
     logger.info("[Pooling] Analysis Complete.")
 
