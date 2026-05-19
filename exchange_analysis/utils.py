@@ -466,6 +466,268 @@ class IOHandler:
 
             final_price = final_price.reset_index().rename(columns={'index': 'time'})
             df_to_timescale(final_price, "Market_Price_Dayahead", schema_name)# ==========================================
+
+    def push_analysis_data(self, config):
+        """
+        Transforms analysis-phase results (Phase 3) into a unified relational
+        structure and pushes them to TimescaleDB.
+
+        Creates four tables:
+            Import_Export_per_Zone          – time, Importer, Exporter, <measures>
+            Import_per_type                – time, Importer, type, <measures>
+            Export_per_type                – time, Exporter, type, <measures>
+            Import_Export_per_type_per_zone – time, Importer, Exporter, type, <measures>
+
+        Measures (one column each):
+            CFT                – Commercial Flow Total (decomposition)
+            Netted_CFT         – Netted Commercial Flow Total (decomposition)
+            Agg_Flow_Tracing   – Aggregated Coupling Flow Tracing
+            Direct_Flow_Tracing – Direct Coupling Flow Tracing
+            Pooled_Net_CFT     – Pooled Commercial Net Position (pooling step 3/4)
+            Pooled_Net_Physical – Pooled Physical Net Position (pooling step 4/4)
+        """
+        logger.info("Starting transformation and push of analysis data to TimescaleDB...")
+        schema_name = config.db_schema_name
+
+        # Mapping: DB column name → self._tables key templates per granularity
+        measure_configs = {
+            "CFT": {
+                "per_zone": "{bz}_import_comm_flow_total_per_bidding_zone",
+                "per_type": "{bz}_import_comm_flow_total_per_type",
+                "per_type_per_zone": "{bz}_import_comm_flow_total_per_type_per_bidding_zone",
+            },
+            "Netted_CFT": {
+                "per_zone": "{bz}_import_comm_flow_total_netted_per_bidding_zone",
+                "per_type": "{bz}_import_comm_flow_total_netted_per_type",
+                "per_type_per_zone": "{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone",
+            },
+            "Agg_Flow_Tracing": {
+                "per_zone": "{bz}_import_flow_tracing_agg_coupling_per_bidding_zone",
+                "per_type": "{bz}_import_flow_tracing_agg_coupling_per_type",
+                "per_type_per_zone": "{bz}_import_flow_tracing_agg_coupling_per_type_per_bidding_zone",
+            },
+            "Direct_Flow_Tracing": {
+                "per_zone": "{bz}_import_flow_tracing_direct_coupling_per_bidding_zone",
+                "per_type": "{bz}_import_flow_tracing_direct_coupling_per_type",
+                "per_type_per_zone": "{bz}_import_flow_tracing_direct_coupling_per_type_per_bidding_zone",
+            },
+            "Pooled_Net_CFT": {
+                "per_zone": "{bz}_pooled_commercial_net_pos_per_bidding_zone",
+                "per_type": "{bz}_pooled_commercial_net_pos_per_type",
+                "per_type_per_zone": "{bz}_pooled_commercial_net_pos_per_type_per_bidding_zone",
+            },
+            "Pooled_Net_Physical": {
+                "per_zone": "{bz}_pooled_physical_net_pos_per_bidding_zone",
+                "per_type": "{bz}_pooled_physical_net_pos_per_type",
+                "per_type_per_zone": "{bz}_pooled_physical_net_pos_per_type_per_bidding_zone",
+            },
+        }
+
+        measure_names = list(measure_configs.keys())
+        zones = config.zones
+        # "Storage" is added separately from gen_types_list in the analysis code
+        known_types = set(config.gen_types_list) | {"Storage"}
+
+        # ---- Helpers ----
+
+        def _get_numeric(key):
+            """Retrieve a table from self._tables, reindexed and filtered to numeric columns."""
+            df = self._tables.get(key)
+            if df is None:
+                return None
+            df = df.reindex(config.time_index)
+            df.index.name = "time"  # Ensure 'time' is the index name for safe reset_index
+            return df.select_dtypes(include=[np.number])
+
+        def _parse_zone_type(col):
+            """Parse a '{zone}_{type}' column into (zone, type) using known zones and types.
+            Tries longest zone prefix first to handle multi-segment codes like DE_LU or IT_NORD."""
+            for zone in sorted(zones, key=len, reverse=True):
+                prefix = zone + "_"
+                if col.startswith(prefix):
+                    remainder = col[len(prefix):]
+                    if remainder in known_types:
+                        return zone, remainder
+            return None, None
+
+        # ========================================================
+        # 1. Import_Export_per_Zone
+        #    Source: per_bidding_zone tables (columns = exporter zones)
+        # ========================================================
+        logger.info("Building Import_Export_per_Zone...")
+        ie_zone_chunks = []
+
+        for bz in zones:
+            measure_frames = {}
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_zone"].format(bz=bz))
+                if df is not None and not df.empty:
+                    melted = df.reset_index().melt(id_vars=["time"], var_name="Exporter", value_name=mname)
+                    measure_frames[mname] = melted
+
+            if not measure_frames:
+                continue
+
+            # Outer-merge all measures on (time, Exporter)
+            merged = None
+            for mname, melted in measure_frames.items():
+                merged = melted if merged is None else merged.merge(melted, on=["time", "Exporter"], how="outer")
+
+            merged["Importer"] = bz
+            ie_zone_chunks.append(merged)
+
+        if ie_zone_chunks:
+            ie_zone_df = pd.concat(ie_zone_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in ie_zone_df.columns:
+                    ie_zone_df[mname] = np.nan
+            ie_zone_df = ie_zone_df[["time", "Importer", "Exporter"] + measure_names]
+            df_to_timescale(ie_zone_df, "Import_Export_per_Zone", schema_name)
+            logger.info("Import_Export_per_Zone pushed (%d rows).", len(ie_zone_df))
+        else:
+            logger.warning("No data found for Import_Export_per_Zone.")
+
+        # ========================================================
+        # 2. Import_per_type
+        #    Source: per_type tables (columns = technology types)
+        # ========================================================
+        logger.info("Building Import_per_type...")
+        imp_type_chunks = []
+
+        for bz in zones:
+            measure_frames = {}
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_type"].format(bz=bz))
+                if df is not None and not df.empty:
+                    melted = df.reset_index().melt(id_vars=["time"], var_name="type", value_name=mname)
+                    measure_frames[mname] = melted
+
+            if not measure_frames:
+                continue
+
+            merged = None
+            for mname, melted in measure_frames.items():
+                merged = melted if merged is None else merged.merge(melted, on=["time", "type"], how="outer")
+
+            merged["Importer"] = bz
+            imp_type_chunks.append(merged)
+
+        if imp_type_chunks:
+            imp_type_df = pd.concat(imp_type_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in imp_type_df.columns:
+                    imp_type_df[mname] = np.nan
+            imp_type_df = imp_type_df[["time", "Importer", "type"] + measure_names]
+            df_to_timescale(imp_type_df, "Import_per_type", schema_name)
+            logger.info("Import_per_type pushed (%d rows).", len(imp_type_df))
+        else:
+            logger.warning("No data found for Import_per_type.")
+
+        # ========================================================
+        # 3. Export_per_type
+        #    Source: per_type_per_zone tables aggregated across all importers,
+        #    grouped by (exporter, type). Columns are "{exporter}_{type}".
+        # ========================================================
+        logger.info("Building Export_per_type...")
+        export_accum = {}  # {(exporter, type): {measure: pd.Series}}
+
+        for importer in zones:
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_type_per_zone"].format(bz=importer))
+                if df is None or df.empty:
+                    continue
+                for col in df.columns:
+                    exporter, tech_type = _parse_zone_type(col)
+                    if exporter is None:
+                        continue
+                    key = (exporter, tech_type)
+                    if key not in export_accum:
+                        export_accum[key] = {}
+                    if mname not in export_accum[key]:
+                        export_accum[key][mname] = pd.Series(0.0, index=config.time_index)
+                    export_accum[key][mname] = export_accum[key][mname].add(
+                        df[col].fillna(0.0), fill_value=0.0
+                    )
+
+        if export_accum:
+            exp_chunks = []
+            for (exporter, tech_type), measures in export_accum.items():
+                chunk = pd.DataFrame(index=config.time_index)
+                chunk.index.name = "time"  # Ensure 'time' is the index name for safe reset_index
+                chunk["Exporter"] = exporter
+                chunk["type"] = tech_type
+                for mname in measure_names:
+                    chunk[mname] = measures.get(mname, np.nan)
+                exp_chunks.append(chunk.reset_index())
+
+            exp_type_df = pd.concat(exp_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in exp_type_df.columns:
+                    exp_type_df[mname] = np.nan
+            exp_type_df = exp_type_df[["time", "Exporter", "type"] + measure_names]
+            df_to_timescale(exp_type_df, "Export_per_type", schema_name)
+            logger.info("Export_per_type pushed (%d rows).", len(exp_type_df))
+        else:
+            logger.warning("No data found for Export_per_type.")
+
+        # ========================================================
+        # 4. Import_Export_per_type_per_zone
+        #    Source: per_type_per_zone tables (columns = "{exporter}_{type}")
+        # ========================================================
+        logger.info("Building Import_Export_per_type_per_zone...")
+        iet_pz_chunks = []
+
+        for importer in zones:
+            measure_frames = {}
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_type_per_zone"].format(bz=importer))
+                if df is None or df.empty:
+                    continue
+
+                # Parse "{zone}_{type}" columns into (exporter, type) pairs
+                col_map = {}
+                valid_cols = []
+                for col in df.columns:
+                    exp, tp = _parse_zone_type(col)
+                    if exp is not None:
+                        col_map[col] = (exp, tp)
+                        valid_cols.append(col)
+
+                if not valid_cols:
+                    continue
+
+                df_sub = df[valid_cols]
+                melted = df_sub.reset_index().melt(id_vars=["time"], var_name="_col", value_name=mname)
+                melted["Exporter"] = melted["_col"].map(lambda c: col_map[c][0])
+                melted["type"] = melted["_col"].map(lambda c: col_map[c][1])
+                melted.drop(columns=["_col"], inplace=True)
+                measure_frames[mname] = melted
+
+            if not measure_frames:
+                continue
+
+            # Outer-merge all measures on (time, Exporter, type)
+            merged = None
+            for mname, melted in measure_frames.items():
+                merged = melted if merged is None else merged.merge(
+                    melted, on=["time", "Exporter", "type"], how="outer"
+                )
+
+            merged["Importer"] = importer
+            iet_pz_chunks.append(merged)
+
+        if iet_pz_chunks:
+            iet_pz_df = pd.concat(iet_pz_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in iet_pz_df.columns:
+                    iet_pz_df[mname] = np.nan
+            iet_pz_df = iet_pz_df[["time", "Importer", "Exporter", "type"] + measure_names]
+            df_to_timescale(iet_pz_df, "Import_Export_per_type_per_zone", schema_name)
+            logger.info("Import_Export_per_type_per_zone pushed (%d rows).", len(iet_pz_df))
+        else:
+            logger.warning("No data found for Import_Export_per_type_per_zone.")
+
+        logger.info("Analysis data transformation and DB push completed.")
 # LOGGING & API UTILS 
 # ==========================================
 def setup_logging(log_file_path: Path, log_level_str: str, debug_mode: bool) -> None:
