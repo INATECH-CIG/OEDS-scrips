@@ -62,47 +62,11 @@ def _merge_gap_methods(df_target: pd.DataFrame, df_source: pd.DataFrame) -> None
 # ==========================================
 # DATA I/O HANDLER
 # ==========================================
-class IOHandlerold:
-    @staticmethod
-    def save(df, tablename, directory,config):
-        df = df.reset_index().rename(columns={"index": "time"})
-
-        # Route metadata structures based on whether the data is raw extraction or downstream analysis
-        is_result_table = tablename.startswith(("analysis_", "tracing_", "pool_", "annual_", "processed_"))
-
-        if is_result_table:
-            date_val = getattr(config, 'analysis_source_date', pd.Timestamp.utcnow().strftime('%Y-%m-%d'))
-            df["source_download_date"] = date_val
-            meta_cols = ["gap_filling_method", "bidding_zone", "source_download_date"]
-        else:
-            df["download_timestamp"] = pd.Timestamp.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-            meta_cols = ["gap_filling_method", "bidding_zone", "download_timestamp"]
-
-        # Enforce column order to maintain tabular consistency
-        data_cols = [c for c in df.columns if c not in meta_cols]
-        present_meta = [c for c in meta_cols if c in df.columns]
-        df = df[data_cols + present_meta]
-
-        #save as csv
-        df_to_timescale(df,tablename, config.db_schema_name)
-
-        #save to timescale
-        Path(directory).mkdir(parents=True, exist_ok=True)
-        df.to_csv(directory / f"{tablename}.csv", index=False)
-
-    @staticmethod
-    def load(filepath, config):
-
-        if filepath.exists():
-            df = pd.read_csv(filepath, index_col=0)
-            df.index = pd.to_datetime(df.index, utc=True)
-
-            mask = (df.index >= config.start) & (df.index <= config.end)
-            return df.loc[mask]
 
 class IOHandler:
-    def __init__(self):
+    def __init__(self, save_csv=False):
         self._tables = {}
+        self.save_csv = save_csv
 
     def save(self, df, tablename, directory, config):
         if df is None:
@@ -134,48 +98,638 @@ class IOHandler:
         present_meta = [c for c in meta_cols if c in df.columns]
         df = df[data_cols + present_meta]
 
-        #save to timescale db
-        df_for_timescale = df.reset_index().rename(columns={"index": "time"})
-        df_for_timescale["time"] = pd.to_datetime(df_for_timescale["time"], utc=True, errors="coerce")
-        df_to_timescale(df_for_timescale, tablename, config.db_schema_name)
-
-        #save to csv file
-        directory = Path(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-        df.to_csv(directory / f"{tablename}.csv", index=False)
-
-        #save in internal memory
+        # IMPORTANT: Only save internally and as CSV, NO direct TimescaleDB push during download/processing
         self._tables[tablename] = df.copy()
+
+        if self.save_csv:
+            directory = Path(directory)
+            directory.mkdir(parents=True, exist_ok=True)
+            df.to_csv(directory / f"{tablename}.csv", index=False)
 
     def load(self, tablename, config):
         if tablename in self._tables:
             df = self._tables[tablename].copy()
             df.index = pd.to_datetime(df.index, utc=True)
-
             mask = (df.index >= config.start) & (df.index <= config.end)
             return df.loc[mask]
+        return None
 
-    # NEW: helper to fetch a table from internal runtime storage
-    def get_table(self, tablename, default=None):
-        return self._tables.get(tablename, default)
+    def push_raw_data_to_db(self, config):
+        """
+        Transforms the internally stored raw data and pushes it
+        into the new TimescaleDB tables in the configured schema.
+        """
+        logger.info("Starting transformation and push of raw data to TimescaleDB...")
 
-    # NEW: helper to check if table exists in internal storage
-    def has_table(self, tablename):
-        return tablename in self._tables
+        schema_name = config.raw_db_schema_name
 
-    # NEW: helper to list all table names in internal storage
-    def list_tables(self):
-        return list(self._tables.keys())
+        # 1. Cross Border Flows Bidding Zones Raw
+        self._push_cross_border_flows(config, schema_name, raw=True)
 
-    # NEW: helper to remove one table from internal storage
-    def delete_table(self, tablename):
-        self._tables.pop(tablename, None)
+        # 2. Zonal Generation Demand Raw
+        self._push_zonal_generation_demand(config, schema_name, raw=True)
 
-    # NEW: helper to clear all runtime-stored tables
-    def clear_storage(self):
-        self._tables.clear()
+        logger.info("Raw data transformation and DB push completed.")
 
-# ==========================================
+    def push_processed_data_to_db(self, config):
+        """
+        Transforms the internally stored processed data and pushes it
+        once at the end into the new TimescaleDB tables in the configured schema.
+        """
+        logger.info("Starting transformation and push to TimescaleDB...")
+
+        schema_name = config.processed_db_schema_name
+
+        # 1. Cross Border Flows Bidding Zones
+        self._push_cross_border_flows(config, schema_name, raw=False)
+
+        # 2. Zonal Generation Demand
+        self._push_zonal_generation_demand(config, schema_name, raw=False)
+
+        # 3. Market Price Dayahead
+        self._push_market_prices(config, schema_name)
+
+        # 4. Net Exports
+        self._push_net_results(config)
+
+        logger.info("Transformation and DB push completed.")
+
+    def _push_net_results(self, config) -> None:
+        """
+        Create and push the ``Net_Exports`` table.
+        The table aggregates the net-export values from:
+        * Generation/Demand (Net Export)
+        * Commercial Flows Dayahead (Net Export)
+        * Commercial Flows Total (Net Export)
+        * Physical Flows (Net Export)
+        * SDAC net position (value column)
+        The table is written to the same schema defined in the PipelineConfig.
+        """
+        logger.info("Creating & pushing Net_Exports table...")
+        schema_name = config.processed_db_schema_name
+
+        # Helper: safely extract a column, returning a Series of NaNs when missing
+        def _extract(col_df: Optional[pd.DataFrame], col_name: str) -> pd.Series:
+            if col_df is None:
+                return pd.Series([np.nan] * len(config.time_index), index=config.time_index)
+            # Accept both "Net_Export" and "Net Export"
+            if col_name in col_df.columns:
+                return col_df[col_name]
+            alt = col_name.replace('_', ' ')
+            if alt in col_df.columns:
+                return col_df[alt]
+            return pd.Series([np.nan] * len(col_df), index=col_df.index)
+
+        net_chunks = []  # one row per zone per timestamp
+        for bz in config.zones:
+            # Base row (time + bidding zone)
+            base = pd.DataFrame(index=config.time_index)
+            base["time"] = config.time_index
+            base["bidding_zone"] = bz
+
+            # 1. Generation/Demand Net Export
+            gen_df = self._tables.get(f"{bz}_generation_demand")
+            base["generation_demand_net_export"] = _extract(gen_df, "Net_Export")
+
+            # 2. Commercial Flows Dayahead Net Export
+            comm_da_df = self._tables.get(f"{bz}_comm_flow_dayahead_bidding_zones")
+            base["commercial_flows_dayahead_net_export"] = _extract(comm_da_df, "Net_Export")
+
+            # 3. Commercial Flows Total Net Export
+            comm_tot_df = self._tables.get(f"{bz}_comm_flow_total_bidding_zones")
+            base["commercial_flows_total_net_export"] = _extract(comm_tot_df, "Net_Export")
+
+            # 4. Physical Flows Net Export
+            phys_df = self._tables.get(f"{bz}_physical_flow_data_bidding_zones")
+            base["physical_flows_net_export"] = _extract(phys_df, "Net_Export")
+
+            # 5. SDAC Net Position (column named "value")
+            sdac_df = self._tables.get(f"{bz}_net_positions_dayahead")
+            if sdac_df is not None and "Value" in sdac_df.columns:
+                base["sdac_net_position"] = sdac_df["Value"]
+            else:
+                base["sdac_net_position"] = np.nan
+
+            net_chunks.append(base)
+
+        # Concatenate all zones
+        net_df = pd.concat(net_chunks, ignore_index=True)
+
+        # Ensure correct column order
+        final_order = [
+            "time",
+            "bidding_zone",
+            "generation_demand_net_export",
+            "commercial_flows_dayahead_net_export",
+            "commercial_flows_total_net_export",
+            "physical_flows_net_export",
+            "sdac_net_position",
+        ]
+        net_df = net_df[final_order]
+
+        # Push to TimescaleDB
+        df_to_timescale(net_df, "Net_Exports", schema_name, fillna=True)
+        logger.info("Net_Exports table successfully pushed.")
+
+    def _push_cross_border_flows(self, config, schema_name, raw=False):
+        logger.info(f"Transforming Cross Border Flows {'Raw' if raw else 'Processed'}...")
+
+        if raw:
+            total_chunks = []
+            da_chunks = []
+            phys_chunks = []
+        else:
+            flow_chunks = []
+
+        for bz in config.zones:
+            if raw:
+                total_key = f"{bz}_raw_commercial_flows"
+                da_key = f"{bz}_raw_commercial_flows_dayahead"
+                phys_key = f"{bz}_raw_physical_flows"
+            else:
+                total_key = f"{bz}_comm_flow_total_bidding_zones"
+                da_key = f"{bz}_comm_flow_dayahead_bidding_zones"
+                phys_key = f"{bz}_physical_flow_data_bidding_zones"
+
+            df_total = self._tables.get(total_key)
+            df_da = self._tables.get(da_key)
+            df_phys = self._tables.get(phys_key)
+
+            for n in config.neighbours_map.get(bz, []):
+                col = f"{bz}_{n}"
+                net_col = f"{col}_net_export"
+
+                # Base dataframe with time index
+                base = pd.DataFrame(index=config.time_index)
+                base['From Zone'] = bz
+                base['To Zone'] = n
+
+                if raw:
+                    # Commercial Total
+                    if df_total is not None and col in df_total.columns:
+                        chunk_t = base.copy()
+                        chunk_t['Comm Flow Total'] = df_total[col]
+                        if 'gap_filling_method' in df_total.columns:
+                            chunk_t['Gap Filling'] = df_total['gap_filling_method']
+                        if 'download_timestamp' in df_total.columns:
+                            chunk_t['Download Time'] = df_total['download_timestamp']
+                        total_chunks.append(chunk_t)
+
+                    # Commercial Dayahead
+                    if df_da is not None and col in df_da.columns:
+                        chunk_da = base.copy()
+                        chunk_da['Comm Flow Dayahead'] = df_da[col]
+                        if 'gap_filling_method' in df_da.columns:
+                            chunk_da['Gap Filling'] = df_da['gap_filling_method']
+                        if 'download_timestamp' in df_da.columns:
+                            chunk_da['Download Time'] = df_da['download_timestamp']
+                        da_chunks.append(chunk_da)
+
+                    # Physical
+                    if df_phys is not None and col in df_phys.columns:
+                        chunk_p = base.copy()
+                        chunk_p['Physical Flow'] = df_phys[col]
+                        if 'gap_filling_method' in df_phys.columns:
+                            chunk_p['Gap Filling'] = df_phys['gap_filling_method']
+                        if 'download_timestamp' in df_phys.columns:
+                            chunk_p['Download Time'] = df_phys['download_timestamp']
+                        phys_chunks.append(chunk_p)
+                else:
+                    # Processed data remains combined
+                    chunk = base.copy()
+                    if df_total is not None:
+                        if net_col in df_total.columns:
+                            chunk['Netted'] = df_total[net_col]
+                        if col in df_total.columns:
+                            chunk['Comm Flow Total'] = df_total[col]
+                        if 'gap_filling_method' in df_total.columns:
+                            chunk['Gap Filling (Comm Flow Total)'] = df_total['gap_filling_method']
+                        if 'download_timestamp' in df_total.columns:
+                            chunk['Download Time (Comm Flow Total)'] = df_total['download_timestamp']
+
+                    if df_da is not None:
+                        if col in df_da.columns:
+                            chunk['Comm Flow Dayahead'] = df_da[col]
+                        if 'gap_filling_method' in df_da.columns:
+                            chunk['Gap Filling (Comm Flow Dayahead)'] = df_da['gap_filling_method']
+                        if 'download_timestamp' in df_da.columns:
+                            chunk['Download Time (Comm Flow Dayahead)'] = df_da['download_timestamp']
+
+                    if df_phys is not None:
+                        if col in df_phys.columns:
+                            chunk['Physical Flow'] = df_phys[col]
+                        if 'gap_filling_method' in df_phys.columns:
+                            chunk['Gap Filling (Physical Flow)'] = df_phys['gap_filling_method']
+                        if 'download_timestamp' in df_phys.columns:
+                            chunk['Download Time (Physical Flow)'] = df_phys['download_timestamp']
+
+                    flow_chunks.append(chunk)
+
+        if raw:
+            # Push Total
+            if total_chunks:
+                final_total = pd.concat(total_chunks).reset_index().rename(columns={'index': 'time'})
+                ordered_cols_total = ['time', 'From Zone', 'To Zone', 'Comm Flow Total', 'Gap Filling', 'Download Time']
+                existing_cols_total = [c for c in ordered_cols_total if c in final_total.columns]
+                final_total = final_total[existing_cols_total]
+                df_to_timescale(final_total, "Cross_Border_Commercial_Total_Flows_Bidding_Zones_Raw", schema_name, fillna=True)
+
+            # Push Dayahead
+            if da_chunks:
+                final_da = pd.concat(da_chunks).reset_index().rename(columns={'index': 'time'})
+                ordered_cols_da = ['time', 'From Zone', 'To Zone', 'Comm Flow Dayahead', 'Gap Filling', 'Download Time']
+                existing_cols_da = [c for c in ordered_cols_da if c in final_da.columns]
+                final_da = final_da[existing_cols_da]
+                df_to_timescale(final_da, "Cross_Border_Commercial_Dayahead_Flows_Bidding_Zones_Raw", schema_name, fillna=True)
+
+            # Push Physical
+            if phys_chunks:
+                final_phys = pd.concat(phys_chunks).reset_index().rename(columns={'index': 'time'})
+                ordered_cols_phys = ['time', 'From Zone', 'To Zone', 'Physical Flow', 'Gap Filling', 'Download Time']
+                existing_cols_phys = [c for c in ordered_cols_phys if c in final_phys.columns]
+                final_phys = final_phys[existing_cols_phys]
+                df_to_timescale(final_phys, "Cross_Border_Physical_Flows_Bidding_Zones_Raw", schema_name, fillna=True)
+
+        else:
+            if flow_chunks:
+                final_flows = pd.concat(flow_chunks).reset_index().rename(columns={'index': 'time'})
+                ordered_cols = [
+                    'time',
+                    'From Zone',
+                    'To Zone',
+                    'Netted',
+                    'Comm Flow Total',
+                    'Comm Flow Dayahead',
+                    'Physical Flow',
+                    'Gap Filling (Comm Flow Total)',
+                    'Gap Filling (Comm Flow Dayahead)',
+                    'Gap Filling (Physical Flow)',
+                    'Download Time (Physical Flow)',
+                    'Download Time (Comm Flow Total)',
+                    'Download Time (Comm Flow Dayahead)',
+                ]
+                existing_ordered_cols = [c for c in ordered_cols if c in final_flows.columns]
+                final_flows = final_flows[existing_ordered_cols]
+                df_to_timescale(final_flows, "Cross_Border_Flows_Bidding_Zones", schema_name, fillna=True)
+
+    def _push_zonal_generation_demand(self, config, schema_name, raw=False):
+        logger.info(f"Transforming Zonal Generation Demand {'Raw' if raw else 'Processed'}...")
+
+        if raw:
+            gen_only_chunks = []
+            demand_only_chunks = []
+        else:
+            gen_chunks = []
+
+        for bz in config.zones:
+            if raw:
+                df_gen = self._tables.get(f"{bz}_raw_generation")
+                df_load = self._tables.get(f"{bz}_raw_load")
+
+                if df_gen is not None:
+                    chunk_gen = df_gen.copy()
+                    chunk_gen['zone'] = bz
+                    gen_only_chunks.append(chunk_gen)
+
+                if df_load is not None:
+                    chunk_load = df_load.copy()
+                    chunk_load['zone'] = bz
+                    demand_only_chunks.append(chunk_load)
+            else:
+                df_gen = self._tables.get(f"{bz}_generation_demand")
+                if df_gen is not None:
+                    chunk = df_gen.copy()
+                    chunk['zone'] = bz
+                    gen_chunks.append(chunk)
+
+        def format_and_save(chunks, table_name, is_raw):
+            if not chunks:
+                return
+            final_df = pd.concat(chunks).reset_index()
+            final_df = final_df.rename(columns={'index': 'time'})
+
+            # Clean up column names (remove spaces and brackets for SQL compatibility)
+            final_df.columns = [c.replace(' ', '_').replace('(', '').replace(')', '') for c in final_df.columns]
+
+            # Ensure 'zone' is the second column right after 'time'
+            cols = list(final_df.columns)
+            if 'zone' in cols:
+                cols.remove('zone')
+                cols.insert(1, 'zone')
+
+            if not is_raw:
+                # Ensure 'gap_filling_method' and 'download_timestamp' are the last 2 columns
+                for col in ['gap_filling_method', 'download_timestamp']:
+                    if col in cols:
+                        cols.remove(col)
+                if 'gap_filling_method' in final_df.columns:
+                    cols.append('gap_filling_method')
+                if 'download_timestamp' in final_df.columns:
+                    cols.append('download_timestamp')
+
+            final_df = final_df[cols]
+            final_df['time'] = pd.to_datetime(final_df['time'], utc=True)
+            df_to_timescale(final_df, table_name, schema_name, fillna=True)
+
+        if raw:
+            format_and_save(gen_only_chunks, "Zonal_Generation_Raw", True)
+            format_and_save(demand_only_chunks, "Zonal_Demand_Raw", True)
+        else:
+            format_and_save(gen_chunks, "Zonal_Generation_Demand", False)
+
+    def _push_market_prices(self, config, schema_name):
+        logger.info("Transforming Market Price Dayahead...")
+        price_chunks = {}
+        timestamp_chunks = {}  # Dictionary to hold timestamps per zone
+
+        for bz in config.zones:
+            df_price = self._tables.get(f"{bz}_market_price_dayahead")
+            if df_price is not None:
+                # Extract Price Value
+                if 'Value' in df_price.columns:
+                    price_chunks[bz] = df_price['Value']
+                elif not df_price.empty:
+                    price_chunks[bz] = df_price.iloc[:, 0]
+
+                # Extract Download Timestamp for this specific zone
+                if 'download_timestamp' in df_price.columns:
+                    timestamp_chunks[bz] = df_price['download_timestamp']
+                else:
+                    timestamp_chunks[bz] = pd.Series([np.nan] * len(df_price), index=df_price.index)
+
+        if price_chunks:
+            # Create the main price DataFrame
+            final_price = pd.DataFrame(price_chunks)
+            final_price.columns = final_price.columns.str.upper()
+
+            # Add the Download Time columns for each zone
+            for bz, ts_series in timestamp_chunks.items():
+                final_price[f"Download Time ({bz.upper()})"] = ts_series
+
+            final_price = final_price.reset_index().rename(columns={'index': 'time'})
+            df_to_timescale(final_price, "Market_Price_Dayahead", schema_name, fillna=True)
+
+    def push_analysis_data(self, config):
+        """
+        Transforms analysis-phase results (Phase 3) into a unified relational
+        structure and pushes them to TimescaleDB.
+
+        Creates four tables:
+            Import_Export_per_Zone          – time, Importer, Exporter, <measures>
+            Import_per_type                – time, Importer, type, <measures>
+            Export_per_type                – time, Exporter, type, <measures>
+            Import_Export_per_type_per_zone – time, Importer, Exporter, type, <measures>
+
+        Measures (one column each):
+            CFT                – Commercial Flow Total (decomposition)
+            Netted_CFT         – Netted Commercial Flow Total (decomposition)
+            Agg_Flow_Tracing   – Aggregated Coupling Flow Tracing
+            Direct_Flow_Tracing – Direct Coupling Flow Tracing
+            Pooled_Net_CFT     – Pooled Commercial Net Position (pooling step 3/4)
+            Pooled_Net_Physical – Pooled Physical Net Position (pooling step 4/4)
+        """
+        logger.info("Starting transformation and push of analysis data to TimescaleDB...")
+        schema_name = config.processed_db_schema_name
+
+        # Mapping: DB column name → self._tables key templates per granularity
+        measure_configs = {
+            "CFT": {
+                "per_zone": "{bz}_import_comm_flow_total_per_bidding_zone",
+                "per_type": "{bz}_import_comm_flow_total_per_type",
+                "per_type_per_zone": "{bz}_import_comm_flow_total_per_type_per_bidding_zone",
+            },
+            "Netted_CFT": {
+                "per_zone": "{bz}_import_comm_flow_total_netted_per_bidding_zone",
+                "per_type": "{bz}_import_comm_flow_total_netted_per_type",
+                "per_type_per_zone": "{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone",
+            },
+            "Agg_Flow_Tracing": {
+                "per_zone": "{bz}_import_flow_tracing_agg_coupling_per_bidding_zone",
+                "per_type": "{bz}_import_flow_tracing_agg_coupling_per_type",
+                "per_type_per_zone": "{bz}_import_flow_tracing_agg_coupling_per_type_per_bidding_zone",
+            },
+            "Direct_Flow_Tracing": {
+                "per_zone": "{bz}_import_flow_tracing_direct_coupling_per_bidding_zone",
+                "per_type": "{bz}_import_flow_tracing_direct_coupling_per_type",
+                "per_type_per_zone": "{bz}_import_flow_tracing_direct_coupling_per_type_per_bidding_zone",
+            },
+            "Pooled_Net_CFT": {
+                "per_zone": "{bz}_pooled_commercial_net_pos_per_bidding_zone",
+                "per_type": "{bz}_pooled_commercial_net_pos_per_type",
+                "per_type_per_zone": "{bz}_pooled_commercial_net_pos_per_type_per_bidding_zone",
+            },
+            "Pooled_Net_Physical": {
+                "per_zone": "{bz}_pooled_physical_net_pos_per_bidding_zone",
+                "per_type": "{bz}_pooled_physical_net_pos_per_type",
+                "per_type_per_zone": "{bz}_pooled_physical_net_pos_per_type_per_bidding_zone",
+            },
+        }
+
+        measure_names = list(measure_configs.keys())
+        zones = config.zones
+        # "Storage" is added separately from gen_types_list in the analysis code
+        known_types = set(config.gen_types_list) | {"Storage"}
+
+        # ---- Helpers ----
+
+        def _get_numeric(key):
+            """Retrieve a table from self._tables, reindexed and filtered to numeric columns."""
+            df = self._tables.get(key)
+            if df is None:
+                return None
+            df = df.reindex(config.time_index)
+            df.index.name = "time"  # Ensure 'time' is the index name for safe reset_index
+            return df.select_dtypes(include=[np.number])
+
+        def _parse_zone_type(col):
+            """Parse a '{zone}_{type}' column into (zone, type) using known zones and types.
+            Tries longest zone prefix first to handle multi-segment codes like DE_LU or IT_NORD."""
+            for zone in sorted(zones, key=len, reverse=True):
+                prefix = zone + "_"
+                if col.startswith(prefix):
+                    remainder = col[len(prefix):]
+                    if remainder in known_types:
+                        return zone, remainder
+            return None, None
+
+        # ========================================================
+        # 1. Import_Export_per_Zone
+        #    Source: per_bidding_zone tables (columns = exporter zones)
+        # ========================================================
+        logger.info("Building Import_Export_per_Zone...")
+        ie_zone_chunks = []
+
+        for bz in zones:
+            measure_frames = {}
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_zone"].format(bz=bz))
+                if df is not None and not df.empty:
+                    melted = df.reset_index().melt(id_vars=["time"], var_name="Exporter", value_name=mname)
+                    measure_frames[mname] = melted
+
+            if not measure_frames:
+                continue
+
+            # Outer-merge all measures on (time, Exporter)
+            merged = None
+            for mname, melted in measure_frames.items():
+                merged = melted if merged is None else merged.merge(melted, on=["time", "Exporter"], how="outer")
+
+            merged["Importer"] = bz
+            ie_zone_chunks.append(merged)
+
+        if ie_zone_chunks:
+            ie_zone_df = pd.concat(ie_zone_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in ie_zone_df.columns:
+                    ie_zone_df[mname] = np.nan
+            ie_zone_df = ie_zone_df[["time", "Importer", "Exporter"] + measure_names]
+            df_to_timescale(ie_zone_df, "Import_Export_per_Zone", schema_name, fillna=True)
+            logger.info("Import_Export_per_Zone pushed (%d rows).", len(ie_zone_df))
+        else:
+            logger.warning("No data found for Import_Export_per_Zone.")
+
+        # ========================================================
+        # 2. Import_per_type
+        #    Source: per_type tables (columns = technology types)
+        # ========================================================
+        logger.info("Building Import_per_type...")
+        imp_type_chunks = []
+
+        for bz in zones:
+            measure_frames = {}
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_type"].format(bz=bz))
+                if df is not None and not df.empty:
+                    melted = df.reset_index().melt(id_vars=["time"], var_name="type", value_name=mname)
+                    measure_frames[mname] = melted
+
+            if not measure_frames:
+                continue
+
+            merged = None
+            for mname, melted in measure_frames.items():
+                merged = melted if merged is None else merged.merge(melted, on=["time", "type"], how="outer")
+
+            merged["Importer"] = bz
+            imp_type_chunks.append(merged)
+
+        if imp_type_chunks:
+            imp_type_df = pd.concat(imp_type_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in imp_type_df.columns:
+                    imp_type_df[mname] = np.nan
+            imp_type_df = imp_type_df[["time", "Importer", "type"] + measure_names]
+            df_to_timescale(imp_type_df, "Import_per_type", schema_name, fillna=True)
+            logger.info("Import_per_type pushed (%d rows).", len(imp_type_df))
+        else:
+            logger.warning("No data found for Import_per_type.")
+
+        # ========================================================
+        # 3. Export_per_type
+        #    Source: per_type_per_zone tables aggregated across all importers,
+        #    grouped by (exporter, type). Columns are "{exporter}_{type}".
+        # ========================================================
+        logger.info("Building Export_per_type...")
+        export_accum = {}  # {(exporter, type): {measure: pd.Series}}
+
+        for importer in zones:
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_type_per_zone"].format(bz=importer))
+                if df is None or df.empty:
+                    continue
+                for col in df.columns:
+                    exporter, tech_type = _parse_zone_type(col)
+                    if exporter is None:
+                        continue
+                    key = (exporter, tech_type)
+                    if key not in export_accum:
+                        export_accum[key] = {}
+                    if mname not in export_accum[key]:
+                        export_accum[key][mname] = pd.Series(0.0, index=config.time_index)
+                    export_accum[key][mname] = export_accum[key][mname].add(
+                        df[col].fillna(0.0), fill_value=0.0
+                    )
+
+        if export_accum:
+            exp_chunks = []
+            for (exporter, tech_type), measures in export_accum.items():
+                chunk = pd.DataFrame(index=config.time_index)
+                chunk.index.name = "time"  # Ensure 'time' is the index name for safe reset_index
+                chunk["Exporter"] = exporter
+                chunk["type"] = tech_type
+                for mname in measure_names:
+                    chunk[mname] = measures.get(mname, np.nan)
+                exp_chunks.append(chunk.reset_index())
+
+            exp_type_df = pd.concat(exp_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in exp_type_df.columns:
+                    exp_type_df[mname] = np.nan
+            exp_type_df = exp_type_df[["time", "Exporter", "type"] + measure_names]
+            df_to_timescale(exp_type_df, "Export_per_type", schema_name, fillna=True)
+            logger.info("Export_per_type pushed (%d rows).", len(exp_type_df))
+        else:
+            logger.warning("No data found for Export_per_type.")
+
+        # ========================================================
+        # 4. Import_Export_per_type_per_zone
+        #    Source: per_type_per_zone tables (columns = "{exporter}_{type}")
+        # ========================================================
+        logger.info("Building Import_Export_per_type_per_zone...")
+        iet_pz_chunks = []
+
+        for importer in zones:
+            measure_frames = {}
+            for mname, pats in measure_configs.items():
+                df = _get_numeric(pats["per_type_per_zone"].format(bz=importer))
+                if df is None or df.empty:
+                    continue
+
+                # Parse "{zone}_{type}" columns into (exporter, type) pairs
+                col_map = {}
+                valid_cols = []
+                for col in df.columns:
+                    exp, tp = _parse_zone_type(col)
+                    if exp is not None:
+                        col_map[col] = (exp, tp)
+                        valid_cols.append(col)
+
+                if not valid_cols:
+                    continue
+
+                df_sub = df[valid_cols]
+                melted = df_sub.reset_index().melt(id_vars=["time"], var_name="_col", value_name=mname)
+                melted["Exporter"] = melted["_col"].map(lambda c: col_map[c][0])
+                melted["type"] = melted["_col"].map(lambda c: col_map[c][1])
+                melted.drop(columns=["_col"], inplace=True)
+                measure_frames[mname] = melted
+
+            if not measure_frames:
+                continue
+
+            # Outer-merge all measures on (time, Exporter, type)
+            merged = None
+            for mname, melted in measure_frames.items():
+                merged = melted if merged is None else merged.merge(
+                    melted, on=["time", "Exporter", "type"], how="outer"
+                )
+
+            merged["Importer"] = importer
+            iet_pz_chunks.append(merged)
+
+        if iet_pz_chunks:
+            iet_pz_df = pd.concat(iet_pz_chunks, ignore_index=True)
+            for mname in measure_names:
+                if mname not in iet_pz_df.columns:
+                    iet_pz_df[mname] = np.nan
+            iet_pz_df = iet_pz_df[["time", "Importer", "Exporter", "type"] + measure_names]
+            df_to_timescale(iet_pz_df, "Import_Export_per_type_per_zone", schema_name, fillna=True)
+            logger.info("Import_Export_per_type_per_zone pushed (%d rows).", len(iet_pz_df))
+        else:
+            logger.warning("No data found for Import_Export_per_type_per_zone.")
+
+        logger.info("Analysis data transformation and DB push completed.")
 # LOGGING & API UTILS 
 # ==========================================
 def setup_logging(log_file_path: Path, log_level_str: str, debug_mode: bool) -> None:

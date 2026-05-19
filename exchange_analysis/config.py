@@ -46,7 +46,8 @@ class PipelineConfig:
         target_zones: Optional[List[str]] = None,
         data_types: Optional[Dict[str, bool]] = None,
         debug_mode: bool = False,
-        db_schema_name = None,
+        raw_db_schema_name = None,
+        processed_db_schema_name = None,
         analysis_flags: Optional[Dict[str, bool]] = None,
         io = None
     ):
@@ -95,7 +96,8 @@ class PipelineConfig:
         if analysis_flags: self.analysis_flags.update(analysis_flags)
 
         self.debug_mode = debug_mode
-        self.db_schema_name = db_schema_name
+        self.raw_db_schema_name = raw_db_schema_name
+        self.processed_db_schema_name = processed_db_schema_name
 
         # ==========================================
         # API DOWNLOAD FILTERS

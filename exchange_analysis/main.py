@@ -16,6 +16,7 @@ from entsoe import EntsoePandasClient
 from config import PipelineConfig
 from utils import setup_logging
 import logging
+from prefect import flow
 
 # --- MODULE IMPORTS ---
 from download_data import (
@@ -78,11 +79,8 @@ def main():
         run_flags=my_run_flags,
         analysis_flags=analysis_subset,
         debug_mode=False,
-        db_schema_name= 'entsoe'
-
-        # Pass the optional variables here (Uncomment the variables in Step 4 to use them)
-        # target_zones=selected_bzs,
-        # data_types=selected_data_types
+        raw_db_schema_name='entsoe_raw',
+        processed_db_schema_name= 'entsoe'
     )
 
     # 7. Setup Logging
@@ -109,6 +107,8 @@ def main():
         download_flows(client, config, "physical")
         fetch_simple_metrics(client, config)
 
+        config.io.push_raw_data_to_db(config)
+
     # --- PHASE 2: PROCESS ---
     gen_data, final_comm, final_phys = None, None, None
     if config.run_phases["process"]:
@@ -129,6 +129,8 @@ def main():
         raw_phys = process_flows(config, "physical")
         final_phys = balance_flows_symmetry(raw_phys, config, "physical")
 
+        config.io.push_processed_data_to_db(config)
+
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
         logger.info("\n=== STARTING ANALYSIS ===")
@@ -144,6 +146,8 @@ def main():
         
         if config.analysis_flags["pooling_analysis"]:
             perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
+
+        config.io.push_analysis_data(config)
     
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
