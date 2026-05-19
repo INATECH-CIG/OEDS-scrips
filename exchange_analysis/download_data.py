@@ -521,5 +521,4 @@ def fetch_simple_metrics(client: EntsoePandasClient, config: PipelineConfig) -> 
                 df = df.apply(pd.to_numeric, errors='coerce')
                 df_resampled = df.resample("1h").mean(numeric_only=True)
                 
-                table_name = f"raw_{name}"
                 config.io.save(df_resampled, f"{bz}_{name}", out_dir, config)
