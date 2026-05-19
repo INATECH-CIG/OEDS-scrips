@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from entsoe import EntsoePandasClient
 from exchange_analysis.config import PipelineConfig
-from exchange_analysis.utils import safe_query, fill_gaps_wrapper, correct_zero_values, _merge_gap_methods, IOHandler
+from exchange_analysis.utils import safe_query, fill_gaps_wrapper, correct_zero_values, _merge_gap_methods
 
 logger = logging.getLogger(__name__)
 
