@@ -228,7 +228,7 @@ class IOHandler:
         net_df = net_df[final_order]
 
         # Push to TimescaleDB
-        df_to_timescale(net_df, "Net_Exports", schema_name)
+        df_to_timescale(net_df, "Net_Exports", schema_name, fillna=True)
         logger.info("Net_Exports table successfully pushed.")
 
     def _push_cross_border_flows(self, config, schema_name, raw=False):
@@ -332,7 +332,7 @@ class IOHandler:
                 ordered_cols_total = ['time', 'From Zone', 'To Zone', 'Comm Flow Total', 'Gap Filling', 'Download Time']
                 existing_cols_total = [c for c in ordered_cols_total if c in final_total.columns]
                 final_total = final_total[existing_cols_total]
-                df_to_timescale(final_total, "Cross_Border_Commercial_Total_Flows_Bidding_Zones_Raw", schema_name)
+                df_to_timescale(final_total, "Cross_Border_Commercial_Total_Flows_Bidding_Zones_Raw", schema_name, fillna=True)
 
             # Push Dayahead
             if da_chunks:
@@ -340,7 +340,7 @@ class IOHandler:
                 ordered_cols_da = ['time', 'From Zone', 'To Zone', 'Comm Flow Dayahead', 'Gap Filling', 'Download Time']
                 existing_cols_da = [c for c in ordered_cols_da if c in final_da.columns]
                 final_da = final_da[existing_cols_da]
-                df_to_timescale(final_da, "Cross_Border_Commercial_Dayahead_Flows_Bidding_Zones_Raw", schema_name)
+                df_to_timescale(final_da, "Cross_Border_Commercial_Dayahead_Flows_Bidding_Zones_Raw", schema_name, fillna=True)
 
             # Push Physical
             if phys_chunks:
@@ -348,7 +348,7 @@ class IOHandler:
                 ordered_cols_phys = ['time', 'From Zone', 'To Zone', 'Physical Flow', 'Gap Filling', 'Download Time']
                 existing_cols_phys = [c for c in ordered_cols_phys if c in final_phys.columns]
                 final_phys = final_phys[existing_cols_phys]
-                df_to_timescale(final_phys, "Cross_Border_Physical_Flows_Bidding_Zones_Raw", schema_name)
+                df_to_timescale(final_phys, "Cross_Border_Physical_Flows_Bidding_Zones_Raw", schema_name, fillna=True)
 
         else:
             if flow_chunks:
@@ -370,7 +370,7 @@ class IOHandler:
                 ]
                 existing_ordered_cols = [c for c in ordered_cols if c in final_flows.columns]
                 final_flows = final_flows[existing_ordered_cols]
-                df_to_timescale(final_flows, "Cross_Border_Flows_Bidding_Zones", schema_name)
+                df_to_timescale(final_flows, "Cross_Border_Flows_Bidding_Zones", schema_name, fillna=True)
 
     def _push_zonal_generation_demand(self, config, schema_name, raw=False):
         logger.info(f"Transforming Zonal Generation Demand {'Raw' if raw else 'Processed'}...")
@@ -429,7 +429,7 @@ class IOHandler:
 
             final_df = final_df[cols]
             final_df['time'] = pd.to_datetime(final_df['time'], utc=True)
-            df_to_timescale(final_df, table_name, schema_name)
+            df_to_timescale(final_df, table_name, schema_name, fillna=True)
 
         if raw:
             format_and_save(gen_only_chunks, "Zonal_Generation_Raw", True)
@@ -467,7 +467,7 @@ class IOHandler:
                 final_price[f"Download Time ({bz.upper()})"] = ts_series
 
             final_price = final_price.reset_index().rename(columns={'index': 'time'})
-            df_to_timescale(final_price, "Market_Price_Dayahead", schema_name)# ==========================================
+            df_to_timescale(final_price, "Market_Price_Dayahead", schema_name, fillna=True)
 
     def push_analysis_data(self, config):
         """
@@ -584,7 +584,7 @@ class IOHandler:
                 if mname not in ie_zone_df.columns:
                     ie_zone_df[mname] = np.nan
             ie_zone_df = ie_zone_df[["time", "Importer", "Exporter"] + measure_names]
-            df_to_timescale(ie_zone_df, "Import_Export_per_Zone", schema_name)
+            df_to_timescale(ie_zone_df, "Import_Export_per_Zone", schema_name, fillna=True)
             logger.info("Import_Export_per_Zone pushed (%d rows).", len(ie_zone_df))
         else:
             logger.warning("No data found for Import_Export_per_Zone.")
@@ -620,7 +620,7 @@ class IOHandler:
                 if mname not in imp_type_df.columns:
                     imp_type_df[mname] = np.nan
             imp_type_df = imp_type_df[["time", "Importer", "type"] + measure_names]
-            df_to_timescale(imp_type_df, "Import_per_type", schema_name)
+            df_to_timescale(imp_type_df, "Import_per_type", schema_name, fillna=True)
             logger.info("Import_per_type pushed (%d rows).", len(imp_type_df))
         else:
             logger.warning("No data found for Import_per_type.")
@@ -667,7 +667,7 @@ class IOHandler:
                 if mname not in exp_type_df.columns:
                     exp_type_df[mname] = np.nan
             exp_type_df = exp_type_df[["time", "Exporter", "type"] + measure_names]
-            df_to_timescale(exp_type_df, "Export_per_type", schema_name)
+            df_to_timescale(exp_type_df, "Export_per_type", schema_name, fillna=True)
             logger.info("Export_per_type pushed (%d rows).", len(exp_type_df))
         else:
             logger.warning("No data found for Export_per_type.")
@@ -724,7 +724,7 @@ class IOHandler:
                 if mname not in iet_pz_df.columns:
                     iet_pz_df[mname] = np.nan
             iet_pz_df = iet_pz_df[["time", "Importer", "Exporter", "type"] + measure_names]
-            df_to_timescale(iet_pz_df, "Import_Export_per_type_per_zone", schema_name)
+            df_to_timescale(iet_pz_df, "Import_Export_per_type_per_zone", schema_name, fillna=True)
             logger.info("Import_Export_per_type_per_zone pushed (%d rows).", len(iet_pz_df))
         else:
             logger.warning("No data found for Import_Export_per_type_per_zone.")

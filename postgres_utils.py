@@ -87,7 +87,7 @@ def ensure_table(tablename, schemaname, df, cur,conn):
     cur.execute(hypertable_sql, (full_table,))
     conn.commit()
 
-def df_to_timescale(df, tablename, schema_name ='public'):
+def df_to_timescale(df, tablename, schema_name ='public', fillna = False):
     """
     Writes a dataframe into a timescale db table
     """
@@ -100,6 +100,10 @@ def df_to_timescale(df, tablename, schema_name ='public'):
     buffer = StringIO()
     df.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
+
+    if fillna:
+        numeric_cols = df.select_dtypes(include='number').columns
+        df[numeric_cols] = df[numeric_cols].fillna(0)
 
     ### delete old entries
     if "time" in df.columns:
