@@ -121,7 +121,7 @@ class IOHandler:
         """
         logger.info("Starting transformation and push of raw data to TimescaleDB...")
 
-        schema_name = config.db_schema_name
+        schema_name = config.raw_db_schema_name
 
         # 1. Cross Border Flows Bidding Zones Raw
         self._push_cross_border_flows(config, schema_name, raw=True)
@@ -138,7 +138,7 @@ class IOHandler:
         """
         logger.info("Starting transformation and push to TimescaleDB...")
 
-        schema_name = config.db_schema_name
+        schema_name = config.processed_db_schema_name
 
         # 1. Cross Border Flows Bidding Zones
         self._push_cross_border_flows(config, schema_name, raw=False)
@@ -166,7 +166,7 @@ class IOHandler:
         The table is written to the same schema defined in the PipelineConfig.
         """
         logger.info("Creating & pushing Net_Exports table...")
-        schema_name = config.db_schema_name
+        schema_name = config.processed_db_schema_name
 
         # Helper: safely extract a column, returning a Series of NaNs when missing
         def _extract(col_df: Optional[pd.DataFrame], col_name: str) -> pd.Series:
@@ -489,7 +489,7 @@ class IOHandler:
             Pooled_Net_Physical – Pooled Physical Net Position (pooling step 4/4)
         """
         logger.info("Starting transformation and push of analysis data to TimescaleDB...")
-        schema_name = config.db_schema_name
+        schema_name = config.processed_db_schema_name
 
         # Mapping: DB column name → self._tables key templates per granularity
         measure_configs = {

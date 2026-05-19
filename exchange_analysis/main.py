@@ -79,7 +79,8 @@ def main():
         run_flags=my_run_flags,
         analysis_flags=analysis_subset,
         debug_mode=False,
-        db_schema_name='entsoe'
+        raw_db_schema_name='entsoe_raw',
+        processed_db_schema_name= 'entsoe'
     )
 
     # 7. Setup Logging
