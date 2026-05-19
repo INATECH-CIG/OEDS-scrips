@@ -82,31 +82,6 @@ def main():
         db_schema_name='entsoe'
     )
 
-    # Set this to true only if you want to debug and load a pickled config object.
-    # This helps for debugging the analysis and post processing  because you can skip downloading in each run
-    # To create a pickled config object, comment in the pickle block at the end of the Phase 2 Block
-    use_pickle = False
-    if use_pickle:
-        import pickle
-        with open("ioHandler.pkl", "rb") as f:
-            io = pickle.load(f)
-
-        my_run_flags = {
-            "download": False,
-            "process": False,
-            "analysis": True,
-            "post_processing": True,
-        }
-
-
-        config = PipelineConfig(
-            date_range=period,
-            run_flags=my_run_flags,
-            analysis_flags=analysis_subset,
-            debug_mode=True,
-            db_schema_name= 'entsoe-new-struct-5',
-            io = io)
-
     # 7. Setup Logging
     timestamp = datetime.now().strftime("%Y-%m-%d")
     timestamp_detailed = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
