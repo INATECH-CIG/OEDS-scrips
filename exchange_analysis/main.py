@@ -16,6 +16,7 @@ from entsoe import EntsoePandasClient
 from config import PipelineConfig
 from utils import setup_logging
 import logging
+from prefect import flow
 
 # --- MODULE IMPORTS ---
 from download_data import (
