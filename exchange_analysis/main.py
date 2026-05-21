@@ -10,8 +10,7 @@ Orchestrates the execution of the entire data pipeline, acting as the main contr
 to trigger downloading, processing, analyzing, and aggregating the grid data.
 """
 
-import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from entsoe import EntsoePandasClient
 from config import PipelineConfig
 from utils import setup_logging
@@ -28,7 +27,7 @@ from download_data import (
     fetch_simple_metrics
 )
 from data_analysis import (
-    perform_decomposition_analysis, 
+    perform_decomposition_analysis,
     perform_aggregated_flow_tracing,
     perform_direct_flow_tracing,
     perform_pooling_analysis,
@@ -36,7 +35,7 @@ from data_analysis import (
 )
 
 @flow
-def main():
+def main(start_time: datetime = None, end_time: datetime = None):
     # ==========================================
     # CONTROL PANEL
     # ==========================================
@@ -55,23 +54,25 @@ def main():
         "dc_flow_tracing_analysis": True,
         "pooling_analysis": True,
     }
-    
-    # 2. Define Period (UTC)
-    period = ("2026-01-01 00:00", "2026-01-31 23:59") 
 
+    # 2. Define Period
+    if start_time is None or end_time is None:
+        # use yesterday as time range
+        yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+        start_time = datetime.combine(yesterday, datetime.min.time(), tzinfo=timezone.utc)
+        end_time = datetime.combine(yesterday, datetime.max.time(), tzinfo=timezone.utc)
+        logger_info_msg = f"Using time range: {start_time} bis {end_time}"
+    else:
+        logger_info_msg = f"Using given time range: {start_time} bis {end_time}"
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
 
-    # 4. Optional: Download only Subsets of Data
-    # -------------------------------------------------------
-    # selected_bzs = ["DE_LU", "FR", "BE"]  
-    #
-    # selected_data_types = {
-    #     "generation": True,
-    #     "flows_commercial_total": True,
-    #     "flows_commercial_dayahead": True, 
-    #     "flows_physical": True,
-    #     "metrics": False
-    # }
-    # -------------------------------------------------------
+    period = (
+        start_time.strftime("%Y-%m-%d %H:%M"),
+        end_time.strftime("%Y-%m-%d %H:%M")
+    )
 
     # 5. Initialize Config
     config = PipelineConfig(
@@ -91,6 +92,7 @@ def main():
     
     logger = logging.getLogger(__name__)
     logger.info("=== STARTING EXCHANGE ANALYSIS PIPELINE ===")
+    logger.info(logger_info_msg)
 
     # ==========================================
     # PIPELINE EXECUTION
@@ -151,6 +153,3 @@ def main():
     
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
-
-if __name__ == "__main__":
-    main()
