@@ -16,7 +16,7 @@ def get_connection(retries: int = 5):
         "user": os.getenv("DB_USER"),
         "password": os.getenv("DB_PASSWORD"),
         "host": "open-data-17_stag",
-        "port":  os.getenv("DB_PORT", "5432")
+        "port":  os.getenv("DB_PORT")
     }
     for trial in range(retries):
         try:
@@ -24,6 +24,11 @@ def get_connection(retries: int = 5):
             return conn
         except psycopg2.OperationalError as e:
             print(f"Timescale Connection attempt {trial} failed: {e}")
+
+            print(e)
+
+            print(conn_params)
+
             if trial < retries-1:
                 print(f"Retrying in 3 seconds")
                 time.sleep(3)
