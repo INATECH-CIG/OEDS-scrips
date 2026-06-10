@@ -15,6 +15,7 @@ from entsoe import EntsoePandasClient
 from exchange_analysis.config import PipelineConfig
 from exchange_analysis.utils import setup_logging
 import logging
+from typing import Optional
 from prefect import flow
 
 # --- MODULE IMPORTS ---
@@ -35,11 +36,11 @@ from exchange_analysis.data_analysis import (
 )
 
 @flow
-def main(start_time: datetime = None, end_time: datetime = None):
+def main(start_time: Optional[datetime] = None, end_time: Optional[datetime] = None, debug_mode: Optional[bool] = False):
     # ==========================================
     # CONTROL PANEL
     # ==========================================
-    
+
     # 1. Execution Flags (True = Run this step)
     my_run_flags = {
         "download": True,
@@ -79,7 +80,7 @@ def main(start_time: datetime = None, end_time: datetime = None):
         date_range=period,
         run_flags=my_run_flags,
         analysis_flags=analysis_subset,
-        debug_mode=False,
+        debug_mode=debug_mode,
         raw_db_schema_name='entsoe_raw',
         processed_db_schema_name= 'entsoe'
     )
