@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 from dotenv import load_dotenv
-from utils import IOHandler
+from exchange_analysis.utils import IOHandler
 
 # Resolve project root explicitly to guarantee localized environment variable discovery
 PROJECT_ROOT = Path(__file__).parent.parent

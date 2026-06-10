@@ -17,8 +17,8 @@ import numpy as np
 import sys
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Tuple, Any, Callable, Union
-from postgres_utils import df_to_timescale
+from typing import Dict, Optional, List, Tuple, Any, Callable
+from shared_utils.postgres_utils import df_to_timescale
 
 logger = logging.getLogger(__name__)
 

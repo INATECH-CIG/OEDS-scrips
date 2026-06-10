@@ -8,7 +8,7 @@ python-dotenv
 requests
 
 # Database
-psycopg2
+psycopg2-binary
 
 # Dependencies for geospatial support
 shapely>=2.0.0
