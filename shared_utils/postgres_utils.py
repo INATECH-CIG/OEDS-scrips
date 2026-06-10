@@ -6,6 +6,10 @@ import pandas as pd
 import psycopg2
 from psycopg2 import sql
 import time
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -23,11 +27,11 @@ def get_connection(retries: int = 5):
             conn = psycopg2.connect(**conn_params)
             return conn
         except psycopg2.OperationalError as e:
-            print(f"Timescale Connection attempt {trial} failed: {e}")
+            logger.info(f"Timescale Connection attempt {trial} failed: {e}")
 
-            print(e)
+            logger.info(e)
 
-            print(conn_params)
+            logger.info(conn_params)
 
             if trial < retries-1:
                 print(f"Retrying in 3 seconds")
