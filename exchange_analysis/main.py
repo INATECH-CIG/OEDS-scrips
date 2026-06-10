@@ -12,13 +12,13 @@ to trigger downloading, processing, analyzing, and aggregating the grid data.
 
 from datetime import datetime, timedelta, timezone
 from entsoe import EntsoePandasClient
-from config import PipelineConfig
-from utils import setup_logging
+from exchange_analysis.config import PipelineConfig
+from exchange_analysis.utils import setup_logging
 import logging
 from prefect import flow
 
 # --- MODULE IMPORTS ---
-from download_data import (
+from exchange_analysis.download_data import (
     download_generation_demand,
     process_generation_demand,
     download_flows,
@@ -26,8 +26,8 @@ from download_data import (
     balance_flows_symmetry,
     fetch_simple_metrics
 )
-from data_analysis import (
-    perform_decomposition_analysis,
+from exchange_analysis.data_analysis import (
+    perform_decomposition_analysis, 
     perform_aggregated_flow_tracing,
     perform_direct_flow_tracing,
     perform_pooling_analysis,
