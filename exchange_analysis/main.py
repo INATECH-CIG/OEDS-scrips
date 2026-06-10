@@ -15,6 +15,7 @@ from entsoe import EntsoePandasClient
 from exchange_analysis.config import PipelineConfig
 from exchange_analysis.utils import setup_logging
 import logging
+from typing import Optional
 from prefect import flow
 
 # --- MODULE IMPORTS ---
@@ -35,16 +36,12 @@ from exchange_analysis.data_analysis import (
 )
 
 @flow
-def main(start_time: datetime = None, end_time: datetime = None):
+def main(    start_time: Optional[datetime] = None, end_time: Optional[datetime] = None):
     # ==========================================
     # CONTROL PANEL
     # ==========================================
 
-    print('cccccccccccccccccc')
-    print('cccccccccccccccccc')
-    print('cccccccccccccccccc')
-    print(start_time)
-    print(end_time)
+
 
 
     
