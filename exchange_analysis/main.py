@@ -39,6 +39,14 @@ def main(start_time: datetime = None, end_time: datetime = None):
     # ==========================================
     # CONTROL PANEL
     # ==========================================
+
+    print('cccccccccccccccccc')
+    print('cccccccccccccccccc')
+    print('cccccccccccccccccc')
+    print(start_time)
+    print(end_time)
+
+
     
     # 1. Execution Flags (True = Run this step)
     my_run_flags = {
