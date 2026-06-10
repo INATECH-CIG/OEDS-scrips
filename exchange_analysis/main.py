@@ -36,14 +36,11 @@ from exchange_analysis.data_analysis import (
 )
 
 @flow
-def main(    start_time: Optional[datetime] = None, end_time: Optional[datetime] = None):
+def main(start_time: Optional[datetime] = None, end_time: Optional[datetime] = None):
+
     # ==========================================
     # CONTROL PANEL
     # ==========================================
-
-
-
-
     
     # 1. Execution Flags (True = Run this step)
     my_run_flags = {
