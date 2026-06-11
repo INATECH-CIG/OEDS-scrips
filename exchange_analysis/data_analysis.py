@@ -121,6 +121,10 @@ def perform_decomposition_analysis(
     logger.info("[Decomposition] Calculating generation mix fractions...")
     gen_fractions: Dict[str, pd.DataFrame] = {}
     for bz, df in gen_dfs_loaded.items():
+        if "Total Generation" not in df.columns:
+            logger.warning(
+                f"Missing 'Total Generation' column for {bz}. Skipping generation fraction calculation for this zone.")
+            continue
         total = df["Total Generation"].replace(0, 1)
         fracs = df[[c for c in df.columns if c in config.gen_types_list]].div(total, axis=0)
         if "Storage Discharge" in df.columns: fracs["Storage"] = df["Storage Discharge"] / total
