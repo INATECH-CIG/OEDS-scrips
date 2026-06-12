@@ -895,7 +895,11 @@ def find_gaps_series(
 
     gaps = gaps.sort_values(by="start").reset_index(drop=True)
 
-    inferred_freq = pd.infer_freq(series.index[:3])
+    if len(series.index) >= 3:
+        inferred_freq = pd.infer_freq(series.index[:3])
+    else:
+        inferred_freq = None
+
     if (inferred_freq is not None) and (len(inferred_freq) == 1): inferred_freq = "1" + inferred_freq
     freq_td = pd.to_timedelta(inferred_freq) if inferred_freq else pd.Timedelta(hours=1)
     gaps["method"] = "UNDEFINED"
