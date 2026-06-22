@@ -205,6 +205,9 @@ def _decompose_and_save(
     
     logger.info(f"   -> Calculating source generation fractions...")
     for bz, df in gen_dfs.items():
+        if df.empty or "Total Generation" not in df.columns:
+            logger.warning(f"Missing 'Total Generation' for {bz}. Skipping...")
+            continue
         total = df["Total Generation"].replace(0, 1)
         fracs = df[[c for c in df.columns if c in config.gen_types_list]].div(total, axis=0) 
         if "Storage Discharge" in df.columns: fracs["Storage"] = df["Storage Discharge"] / total
