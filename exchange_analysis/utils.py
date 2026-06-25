@@ -1181,6 +1181,6 @@ def _sync_time_index(config, gen_dfs, comm_dfs, phys_dfs):
             "Keine überlappende Zeitreihe zwischen Config und geladenen Daten gefunden. Analyse wird übersprungen.")
         return False
 
-    config.time_index = common_idx.sort_index()
+    config.time_index = common_idx.sort_values()
     logger.info(f"[SYSTEM] Zeitindex automatisch synchronisiert: {config.time_index[0]} bis {config.time_index[-1]}")
     return True
