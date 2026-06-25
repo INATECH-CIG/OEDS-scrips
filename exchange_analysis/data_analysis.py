@@ -283,11 +283,19 @@ def perform_aggregated_flow_tracing(
             Pin_arr: List[float] = [0.0] * len(config.zones)
             A_arr: List[float] = [0.0] * len(config.zones)
             exports: float = 0.0
-            
-            for n in [x for x in config.neighbours_map[bz] if x in config.zones and f"{bz}_{x}_net_export" in phys_flow_dfs_loaded[bz].columns]:
-                val = phys_flow_dfs_loaded[bz].at[t, f"{bz}_{n}_net_export"]
-                if val < 0: A_arr[config.zones.index(n)] = float(val)
-                else: exports += float(val)
+
+            phys_df = phys_flow_dfs_loaded.get(bz)
+            if phys_df is None or phys_df.empty:
+                logger.debug(f"Keine physikalischen Flow-Daten für {bz} an {t}. Verwende 0.0-Fallback.")
+                phys_df = pd.DataFrame()
+
+            for n in [x for x in config.neighbours_map[bz] if
+                      x in config.zones and f"{bz}_{n}_net_export" in phys_df.columns]:
+                val = float(phys_df.at[t, f"{bz}_{n}_net_export"])
+                if val < 0:
+                    A_arr[config.zones.index(n)] = val
+                else:
+                    exports += val
             
             net_exp = float(phys_flow_dfs_loaded[bz].at[t, "Net Export"])
             if net_exp > 0:
@@ -386,15 +394,27 @@ def perform_direct_flow_tracing(
                 load_val = 0.0
                 logger.warning(f"Warning: Missing generation array for {bz} at {t}")
 
-            net_exp = float(phys_flow_dfs_loaded[bz].at[t, "Net Export"])
-            
+            # SICHERER ZUGRIFF AUF PHYSISCHE FLOW-DATEN
+            phys_df = phys_flow_dfs_loaded.get(bz)
+            if phys_df is None or phys_df.empty:
+                logger.debug(f"Keine physikalischen Flow-Daten für {bz}. Verwende 0.0-Fallback.")
+                phys_df = pd.DataFrame()
+
+            # Net Export sicher extrahieren (prüft Index & Spalte)
+            net_exp = float(phys_df.at[t, "Net Export"]) if (
+                        "Net Export" in phys_df.columns and t in phys_df.index) else 0.0
+
             alt_gen = load_val + net_exp
             alt_demand = gen_val - net_exp
-            
-            for n in [x for x in config.neighbours_map[bz] if x in config.zones and f"{bz}_{x}_net_export" in phys_flow_dfs_loaded[bz].columns]:
-                val = phys_flow_dfs_loaded[bz].at[t, f"{bz}_{n}_net_export"]
-                if val < 0: A_arr[config.zones.index(n)] = float(val)
-                else: exports += float(val)
+
+            # Sichere Iteration über Nachbarn (nutzt .get() für neighbours_map)
+            for n in [x for x in config.neighbours_map.get(bz, []) if
+                      x in config.zones and f"{bz}_{x}_net_export" in phys_df.columns]:
+                val = float(phys_df.at[t, f"{bz}_{n}_net_export"])
+                if val < 0:
+                    A_arr[config.zones.index(n)] = val
+                else:
+                    exports += val
             
             if load_val > 0:
                 Gin_arr[config.zones.index(bz)], A_arr[config.zones.index(bz)] = (alt_gen if alt_gen > 0 else gen_val), load_val + exports
