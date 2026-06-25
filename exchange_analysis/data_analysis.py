@@ -284,20 +284,32 @@ def perform_aggregated_flow_tracing(
             A_arr: List[float] = [0.0] * len(config.zones)
             exports: float = 0.0
 
+            # SICHERER ZUGRIFF & KORREKTUR DES LIST-COMPREHENSION
             phys_df = phys_flow_dfs_loaded.get(bz)
             if phys_df is None or phys_df.empty:
-                logger.debug(f"Keine physikalischen Flow-Daten für {bz} an {t}. Verwende 0.0-Fallback.")
+                logger.debug(f"Keine physikalischen Flow-Daten für {bz}. Verwende 0.0-Fallback.")
                 phys_df = pd.DataFrame()
 
-            for n in [x for x in config.neighbours_map[bz] if
-                      x in config.zones and f"{bz}_{n}_net_export" in phys_df.columns]:
+            for n in [x for x in config.neighbours_map.get(bz, []) if
+                      x in config.zones and f"{bz}_{x}_net_export" in phys_df.columns]:
                 val = float(phys_df.at[t, f"{bz}_{n}_net_export"])
                 if val < 0:
                     A_arr[config.zones.index(n)] = val
                 else:
                     exports += val
-            
-            net_exp = float(phys_flow_dfs_loaded[bz].at[t, "Net Export"])
+
+            # Net Export sicher extrahieren (Index & Spalte prüfen)
+            net_exp = float(phys_df.at[t, "Net Export"]) if (
+                        "Net Export" in phys_df.columns and t in phys_df.index) else 0.0
+
+            if net_exp > 0:
+                Pin_arr[config.zones.index(bz)], A_arr[config.zones.index(bz)] = net_exp, exports
+                net_imps.append(0.0)
+            else:
+                A_arr[config.zones.index(bz)] = exports + abs(net_exp)
+                net_imps.append(-net_exp)
+            Pin.append(Pin_arr)
+            A.append(A_arr)
             if net_exp > 0:
                 Pin_arr[config.zones.index(bz)], A_arr[config.zones.index(bz)] = net_exp, exports
                 net_imps.append(0.0)
