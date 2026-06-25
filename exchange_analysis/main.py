@@ -16,7 +16,9 @@ from exchange_analysis.config import PipelineConfig
 from exchange_analysis.utils import setup_logging
 import logging
 from typing import Optional
+from BulkDownload import EntsoeFileClientAdapter
 from prefect import flow
+import pickle
 
 # --- MODULE IMPORTS ---
 from exchange_analysis.download_data import (
@@ -35,7 +37,6 @@ from exchange_analysis.data_analysis import (
     perform_post_processing_aggregation
 )
 
-@flow
 def main(start_time: Optional[datetime] = None,
          end_time: Optional[datetime] = None,
          schema_name: Optional[str] = 'entsoe',
@@ -105,15 +106,17 @@ def main(start_time: Optional[datetime] = None,
     # --- PHASE 1: DOWNLOAD ---
     if config.run_phases["download"]:
         logger.info(f"=== STARTING DOWNLOAD ({config.start} to {config.end}) ===")
-        client = EntsoePandasClient(api_key=config.api_key)
-        
+        client = EntsoeFileClientAdapter(debug= False, target_zones= config.target_zones)
+
         download_generation_demand(client, config)
         download_flows(client, config,"commercial", dayahead=False)
         download_flows(client, config, "commercial", dayahead=True)
         download_flows(client, config, "physical")
-        fetch_simple_metrics(client, config)
 
-        config.io.push_raw_data_to_db(config)
+
+       # fetch_simple_metrics(client, config)
+
+        #config.io.push_raw_data_to_db(config)
 
     # --- PHASE 2: PROCESS ---
     gen_data, final_comm, final_phys = None, None, None
@@ -135,7 +138,12 @@ def main(start_time: Optional[datetime] = None,
         raw_phys = process_flows(config, "physical")
         final_phys = balance_flows_symmetry(raw_phys, config, "physical")
 
-        config.io.push_processed_data_to_db(config)
+    with open("bulk.pkl", "wb") as f:
+        pickle.dump(config.io, f)
+
+    return
+
+      #  config.io.push_processed_data_to_db(config)
 
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
@@ -153,7 +161,11 @@ def main(start_time: Optional[datetime] = None,
         if config.analysis_flags["pooling_analysis"]:
             perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
 
-        config.io.push_analysis_data(config)
+  #      config.io.push_analysis_data(config)
     
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
+
+if __name__ == "__main__":
+    main (start_time = "-%m-%d %H:%M",
+         end_time = None)

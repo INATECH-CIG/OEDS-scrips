@@ -110,8 +110,7 @@ class IOHandler:
         if tablename in self._tables:
             df = self._tables[tablename].copy()
             df.index = pd.to_datetime(df.index, utc=True)
-            mask = (df.index >= config.start) & (df.index <= config.end)
-            return df.loc[mask]
+            return df
         return None
 
     def push_raw_data_to_db(self, config):

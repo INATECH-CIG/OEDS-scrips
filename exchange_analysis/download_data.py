@@ -54,9 +54,8 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
             except Exception as e: 
                 logger.error(f"[Error] Failed to download GB data: {e}", exc_info=config.debug_mode)
         else:
-            gen_df = safe_query(client.query_generation, context=f"Generation {bz}", country_code=bz, start=config.start, end=config.end, nett=True)
-            load_df = safe_query(client.query_load, context=f"Load {bz}", country_code=bz, start=config.start, end=config.end)
-
+            gen_df = client.query_generation(country_code=bz, nett=True)
+            load_df = client.query_load(country_code=bz)
         config.io.save(gen_df, f"{bz}_raw_generation", raw_dir, config)
         config.io.save(load_df, f"{bz}_raw_load", raw_dir, config)
 
@@ -198,7 +197,7 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
 # ==========================================
 # FLOWS
 # ==========================================
-def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> None:
+def download_flows_old(client: EntsoePandasClient, config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> None:
     """
     Downloads scheduled commercial or physical cross-border exchanges.
     Builds the bilateral combinations based on the defined neighbor map.
@@ -227,6 +226,23 @@ def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type
         if flow_df is not None: 
             table_name = f"{bz}_raw_{flow_type}_flows{'_dayahead' if dayahead else ''}"
             config.io.save(flow_df, table_name, raw_dir, config)
+
+def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> None:
+    folder = "physical_flow_data_bidding_zones" if flow_type == "physical" else f"comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones"
+    raw_dir = config.get_output_path(folder) / "raw"
+
+    if flow_type == "commercial":
+        if dayahead:
+            flow_dfs = client.commercial_flows
+        else:
+            flow_dfs = client.commercial_flows_dayahead
+
+    if flow_type == "physical":
+        flow_dfs = client.physical_flows
+
+    for tablename, df in flow_dfs.items():
+        config.io.save(df, tablename, raw_dir, config)
+
 
 def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
     """
