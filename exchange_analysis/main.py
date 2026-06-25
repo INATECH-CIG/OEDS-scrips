@@ -142,6 +142,11 @@ def main(start_time: Optional[datetime] = None,
 
       #config.io.push_processed_data_to_db(config)
 
+    with open("ioHandler.pkl", "wb") as f:
+        pickle.dump(config.io, f)
+
+
+
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
         logger.info("\n=== SYNCHRONIZING TIME INDEX ===")
@@ -149,10 +154,10 @@ def main(start_time: Optional[datetime] = None,
             logger.warning("Alle Analyse-Module werden aufgrund fehlender Zeitüberschneidung übersprungen.")
         else:
             logger.info("\n=== STARTING ANALYSIS ===")
-            if config.analysis_flags["zone_to_gen_type_analysis"]:
-                perform_decomposition_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm)
-            if config.analysis_flags["ac_flow_tracing_analysis"]:
-                perform_aggregated_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
+            #if config.analysis_flags["zone_to_gen_type_analysis"]:
+                #perform_decomposition_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm)
+            #if config.analysis_flags["ac_flow_tracing_analysis"]:
+               # perform_aggregated_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
             if config.analysis_flags["dc_flow_tracing_analysis"]:
                 perform_direct_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
             if config.analysis_flags["pooling_analysis"]:
