@@ -39,7 +39,7 @@ from exchange_analysis.data_analysis import (
 
 def main(start_time: Optional[datetime] = None,
          end_time: Optional[datetime] = None,
-         schema_name: Optional[str] = 'entsoe',
+         schema_name: Optional[str] = 'historic-entsoe',
          debug_mode: Optional[bool] = False):
     # ==========================================
     # CONTROL PANEL
@@ -106,13 +106,12 @@ def main(start_time: Optional[datetime] = None,
     # --- PHASE 1: DOWNLOAD ---
     if config.run_phases["download"]:
         logger.info(f"=== STARTING DOWNLOAD ({config.start} to {config.end}) ===")
-        client = EntsoeFileClientAdapter(debug= False, target_zones= config.target_zones)
+        client = EntsoeFileClientAdapter(debug= False, target_zones= config.target_zones, year = 2024)
 
         download_generation_demand(client, config)
         download_flows(client, config,"commercial", dayahead=False)
         download_flows(client, config, "commercial", dayahead=True)
         download_flows(client, config, "physical")
-
 
        # fetch_simple_metrics(client, config)
 
@@ -138,12 +137,7 @@ def main(start_time: Optional[datetime] = None,
         raw_phys = process_flows(config, "physical")
         final_phys = balance_flows_symmetry(raw_phys, config, "physical")
 
-    with open("bulk.pkl", "wb") as f:
-        pickle.dump(config.io, f)
-
-    return
-
-      #  config.io.push_processed_data_to_db(config)
+      #config.io.push_processed_data_to_db(config)
 
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
@@ -161,7 +155,7 @@ def main(start_time: Optional[datetime] = None,
         if config.analysis_flags["pooling_analysis"]:
             perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
 
-  #      config.io.push_analysis_data(config)
+    #config.io.push_analysis_data(config)
     
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
