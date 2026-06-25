@@ -318,24 +318,31 @@ def perform_aggregated_flow_tracing(
                 net_imps.append(-net_exp)
             Pin.append(Pin_arr)
             A.append(A_arr)
-        
+
+
         # Evaluate diagonal elements for singularities and apply mathematical smoothing if required
         for idx, bz_name in enumerate(config.zones):
             if A[idx][idx] == 0:
-                # Capture state diagnostics prior to applying inversion patch
-                bz_net = phys_flow_dfs_loaded[bz_name].at[t, "Net Export"]
-                borders = {
-                    f"{bz_name}->{n}": phys_flow_dfs_loaded[bz_name].at[t, f"{bz_name}_{n}_net_export"] 
-                    for n in config.neighbours_map[bz_name] 
-                    if f"{bz_name}_{n}_net_export" in phys_flow_dfs_loaded[bz_name].columns
-                }
-                
+                phys_df = phys_flow_dfs_loaded.get(bz_name)
+
+                # Fallback: Net Export sicher extrahieren oder auf 0.0 setzen
+                if phys_df is not None and not phys_df.empty and "Net Export" in phys_df.columns and t in phys_df.index:
+                    bz_net = phys_df.at[t, "Net Export"]
+                else:
+                    bz_net = 0.0
+
+                borders = {}
+                for n in config.neighbours_map.get(bz_name, []):
+                    col_name = f"{bz_name}_{n}_net_export"
+                    if phys_df is not None and col_name in phys_df.columns and t in phys_df.index:
+                        borders[f"{bz_name}->{n}"] = phys_df.at[t, col_name]
+
                 logger.warning(
                     f"[Singularity Prevented] Time: {t} | {bz_name} diagonal is 0.0. "
-                    f"Net Export: {bz_net:.2f} | Borders: {borders}. "
+                    f"Net Export: {bz_net} | Borders: {borders}. "
                     f"Applying 1.0 patch to permit inversion."
                 )
-                
+
                 # Enforce non-zero diagonal to permit matrix inversion
                 A[idx][idx] = 1.0
         
