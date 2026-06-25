@@ -16,7 +16,7 @@ from exchange_analysis.config import PipelineConfig
 from exchange_analysis.utils import setup_logging
 import logging
 from typing import Optional
-from BulkDownload import EntsoeFileClientAdapter
+from exchange_analysis.BulkDownload import EntsoeFileClientAdapter
 from prefect import flow
 import pickle
 
