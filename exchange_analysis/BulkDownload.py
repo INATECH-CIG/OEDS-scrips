@@ -4,6 +4,7 @@ from entsoe.files import EntsoeFileClient
 from entsoe.files import EntsoeFileClient
 import pandas as pd
 from collections import defaultdict
+from env import pw
 
 AREAS = {
     "DE_50HZ": ('10YDE-VE-------2', '50Hertz CA, DE(50HzT) BZA', 'Europe/Berlin'),
@@ -74,28 +75,28 @@ class EntsoeFileClientAdapter:
     but reads data from the ENTSO-E Transparency FTP/file bulk downloads.
     """
 
-    def __init__(self, debug = False, target_zones = None):
+    def __init__(self, debug = False, target_zones = None, year = None):
         self.debug = debug
         self.client = client = EntsoeFileClient(
             'niklas.gerlach@email.uni-freiburg.de',
-            '')
+            pw)
 
-        self.load_dfs = self.download_load()
-        self.gen_dfs = self.download_generation()
+        if year is not None:
+            self.year = year
+
+        self.load_dfs = self.download_load(year = self.year)
+        self.gen_dfs = self.download_generation(year = self.year)
 
         self.commercial_flows_dayahead =None
         self.commercial_flows = None
         self.physical_flows = None
 
-        self.download_scheduled_exchanges(target_zones = target_zones)
-        self.download_physical_flows(target_zones = target_zones)
+        self.download_scheduled_exchanges(target_zones = target_zones, year = self.year)
+        self.download_physical_flows(target_zones = target_zones, year = self.year)
 
     def download_load(self,year = None):
         folder_name = 'ActualTotalLoad_6.1.A_r3'
         file_list = self.client.list_folder(folder_name)
-        if year is not None:
-            filtered = [file for file in file_list if file.startswith(str(year))]
-            file_list = filtered
 
         count = 0
         combined_dfs = []
@@ -103,6 +104,9 @@ class EntsoeFileClientAdapter:
             count += 1
             if count > 10 and self.debug:
                 break
+            if not file.startswith(str(year)):
+                continue
+
             print(file)
             df = self.client.download_single_file(folder_name, file)
 
@@ -158,10 +162,6 @@ class EntsoeFileClientAdapter:
         folder_name = 'AggregatedGenerationPerType_16.1.B_C_r3'
         file_list = self.client.list_folder(folder_name)
 
-        if year is not None:
-            filtered = [file for file in file_list if file.startswith(str(year))]
-            file_list = filtered
-
         count = 0
         combined_dfs = []
 
@@ -169,6 +169,9 @@ class EntsoeFileClientAdapter:
             count += 1
             if count > 10 and self.debug:
                 break
+            if not file.startswith(str(year)):
+                continue
+
 
             print(file)
             df = self.client.download_single_file(folder_name, file)
@@ -242,10 +245,6 @@ class EntsoeFileClientAdapter:
         folder_name = 'CommercialSchedules_12.1.F_r3 '
         file_list = self.client.list_folder(folder_name)
 
-        if year is not None:
-            filtered = [file for file in file_list if file.startswith(str(year))]
-            file_list = filtered
-
         count = 0
 
         # CHANGED: accumulators are now dicts of lists, keyed by bidding zone
@@ -265,6 +264,9 @@ class EntsoeFileClientAdapter:
             count += 1
             if count > 10 and self.debug:
                 break
+            if not file.startswith(str(year)):
+                continue
+
 
             print(file)
             df = self.client.download_single_file(folder_name, file)
@@ -341,10 +343,6 @@ class EntsoeFileClientAdapter:
         folder_name = 'PhysicalFlows_12.1.G_r3 '
         file_list = self.client.list_folder(folder_name)
 
-        if year is not None:
-            filtered = [file for file in file_list if file.startswith(str(year))]
-            file_list = filtered
-
         count = 0
 
         # CHANGED: only one accumulator is needed for physical flows
@@ -363,6 +361,9 @@ class EntsoeFileClientAdapter:
             count += 1
             if count > 10 and self.debug:
                 break
+
+            if not file.startswith(str(year)):
+                continue
 
             print(file)
             df = self.client.download_single_file(folder_name, file)
