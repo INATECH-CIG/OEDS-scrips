@@ -90,9 +90,12 @@ class EntsoeFileClientAdapter:
         self.download_scheduled_exchanges(target_zones = target_zones)
         self.download_physical_flows(target_zones = target_zones)
 
-    def download_load(self):
+    def download_load(self,year = None):
         folder_name = 'ActualTotalLoad_6.1.A_r3'
         file_list = self.client.list_folder(folder_name)
+        if year is not None:
+            filtered = [file for file in file_list if file.startswith(str(year))]
+            file_list = filtered
 
         count = 0
         combined_dfs = []
@@ -151,9 +154,13 @@ class EntsoeFileClientAdapter:
         else:
             return df
 
-    def download_generation(self):
+    def download_generation(self, year = None):
         folder_name = 'AggregatedGenerationPerType_16.1.B_C_r3'
         file_list = self.client.list_folder(folder_name)
+
+        if year is not None:
+            filtered = [file for file in file_list if file.startswith(str(year))]
+            file_list = filtered
 
         count = 0
         combined_dfs = []
@@ -231,9 +238,13 @@ class EntsoeFileClientAdapter:
         else:
             return df
 
-    def download_scheduled_exchanges(self, target_zones = None):
+    def download_scheduled_exchanges(self, target_zones = None, year = None):
         folder_name = 'CommercialSchedules_12.1.F_r3 '
         file_list = self.client.list_folder(folder_name)
+
+        if year is not None:
+            filtered = [file for file in file_list if file.startswith(str(year))]
+            file_list = filtered
 
         count = 0
 
@@ -326,9 +337,13 @@ class EntsoeFileClientAdapter:
             commercial_flows_dayahead[f"{bz}_raw_commercial_flows_dayahead"] = df
         self.commercial_flows_dayahead = commercial_flows_dayahead
 
-    def download_physical_flows(self, target_zones=None):
+    def download_physical_flows(self, target_zones=None, year = None):
         folder_name = 'PhysicalFlows_12.1.G_r3 '
         file_list = self.client.list_folder(folder_name)
+
+        if year is not None:
+            filtered = [file for file in file_list if file.startswith(str(year))]
+            file_list = filtered
 
         count = 0
 
