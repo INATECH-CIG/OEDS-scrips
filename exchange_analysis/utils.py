@@ -1165,3 +1165,22 @@ def correct_zero_values(df: pd.DataFrame, gaps_dir: Path, bz: str, config: Any, 
         df["Net Export"] = df[net_export_cols].sum(axis=1)
 
     return df
+
+
+def _sync_time_index(config, gen_dfs, comm_dfs, phys_dfs):
+    """Pass config.time_index automatisch an die tatsächlich geladenen Daten an."""
+    common_idx = config.time_index
+    for df_dict in [gen_dfs, comm_dfs, phys_dfs]:
+        if df_dict:
+            for df in df_dict.values():
+                if not df.empty:
+                    common_idx = common_idx.intersection(df.index)
+
+    if len(common_idx) == 0:
+        logger.error(
+            "Keine überlappende Zeitreihe zwischen Config und geladenen Daten gefunden. Analyse wird übersprungen.")
+        return False
+
+    config.time_index = common_idx.sort_index()
+    logger.info(f"[SYSTEM] Zeitindex automatisch synchronisiert: {config.time_index[0]} bis {config.time_index[-1]}")
+    return True

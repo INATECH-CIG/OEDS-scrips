@@ -268,19 +268,6 @@ def perform_aggregated_flow_tracing(
         if bz in gen_dfs_loaded: gen_dfs_loaded[bz] = gen_dfs_loaded[bz].resample("1h").mean(numeric_only=True).fillna(0)
         if bz in phys_flow_dfs_loaded: phys_flow_dfs_loaded[bz] = phys_flow_dfs_loaded[bz].resample("1h").mean(numeric_only=True).fillna(0)
 
-    common_idx = config.time_index
-    for bz in config.zones:
-        if bz in phys_flow_dfs_loaded and not phys_flow_dfs_loaded[bz].empty:
-            common_idx = common_idx.intersection(phys_flow_dfs_loaded[bz].index)
-
-    if len(common_idx) == 0:
-        logger.error(
-            "Keine überlappende Zeitreihe zwischen Config und geladenen Flow-Daten gefunden. Tracing wird abgebrochen.")
-        return
-
-    config.time_index = common_idx.sort_index()
-    logger.info(f"[Agg. Coupling] Angepasster Zeitindex: {config.time_index[0]} bis {config.time_index[-1]}")
-
     agg_tracing = {bz: pd.DataFrame(0.0, index=config.time_index, columns=config.zones, dtype=float) for bz in config.zones}
     agg_dir = config.output_dir / "import_flow_tracing_bidding_zones/agg_coupling" / str(config.year)
     sing_times: List[pd.Timestamp] = []

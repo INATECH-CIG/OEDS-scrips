@@ -13,7 +13,7 @@ to trigger downloading, processing, analyzing, and aggregating the grid data.
 from datetime import datetime, timedelta, timezone
 from entsoe import EntsoePandasClient
 from exchange_analysis.config import PipelineConfig
-from exchange_analysis.utils import setup_logging
+from exchange_analysis.utils import setup_logging, _sync_time_index
 import logging
 from typing import Optional
 from exchange_analysis.BulkDownload import EntsoeFileClientAdapter
@@ -141,19 +141,19 @@ def main(start_time: Optional[datetime] = None,
 
     # --- PHASE 3: ANALYSIS ---
     if config.run_phases["analysis"]:
-        logger.info("\n=== STARTING ANALYSIS ===")
-
-        if config.analysis_flags["zone_to_gen_type_analysis"]:
-            perform_decomposition_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm)
-        
-        if config.analysis_flags["ac_flow_tracing_analysis"]:
-            perform_aggregated_flow_tracing(config,gen_dfs=gen_data, phys_flow_dfs=final_phys)
-
-        if config.analysis_flags["dc_flow_tracing_analysis"]:
-            perform_direct_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
-        
-        if config.analysis_flags["pooling_analysis"]:
-            perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
+        logger.info("\n=== SYNCHRONIZING TIME INDEX ===")
+        if not _sync_time_index(config, gen_data, final_comm, final_phys):
+            logger.warning("Alle Analyse-Module werden aufgrund fehlender Zeitüberschneidung übersprungen.")
+        else:
+            logger.info("\n=== STARTING ANALYSIS ===")
+            if config.analysis_flags["zone_to_gen_type_analysis"]:
+                perform_decomposition_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm)
+            if config.analysis_flags["ac_flow_tracing_analysis"]:
+                perform_aggregated_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
+            if config.analysis_flags["dc_flow_tracing_analysis"]:
+                perform_direct_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
+            if config.analysis_flags["pooling_analysis"]:
+                perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
 
     #config.io.push_analysis_data(config)
     
@@ -161,5 +161,4 @@ def main(start_time: Optional[datetime] = None,
         perform_post_processing_aggregation(config)
 
 if __name__ == "__main__":
-    main (start_time = "-%m-%d %H:%M",
-         end_time = None)
+    main(start_time=None, end_time=None)
