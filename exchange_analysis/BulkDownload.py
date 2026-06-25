@@ -4,7 +4,7 @@ from entsoe.files import EntsoeFileClient
 from entsoe.files import EntsoeFileClient
 import pandas as pd
 from collections import defaultdict
-from env import pw
+from exchange_analysis.env import pw
 
 AREAS = {
     "DE_50HZ": ('10YDE-VE-------2', '50Hertz CA, DE(50HzT) BZA', 'Europe/Berlin'),
