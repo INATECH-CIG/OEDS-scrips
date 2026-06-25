@@ -39,6 +39,7 @@ from exchange_analysis.data_analysis import (
 
 def main(start_time: Optional[datetime] = None,
          end_time: Optional[datetime] = None,
+         year: Optional[int] = None,
          schema_name: Optional[str] = 'historic-entsoe',
          debug_mode: Optional[bool] = False):
     # ==========================================
@@ -61,23 +62,25 @@ def main(start_time: Optional[datetime] = None,
     }
 
     # 2. Define Period
+    if year is None:
+        year = datetime.now(timezone.utc).year
+
     if start_time is None or end_time is None:
-        # use yesterday as time range
-        yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
-        start_time = datetime.combine(yesterday, datetime.min.time(), tzinfo=timezone.utc)
-        end_time = datetime.combine(yesterday, datetime.max.time(), tzinfo=timezone.utc)
-        logger_info_msg = f"Using time range: {start_time} bis {end_time}"
+        start_time = datetime(year, 1, 1, 0, 0, tzinfo=timezone.utc)
+        end_time = datetime(year, 12, 31, 23, 59, tzinfo=timezone.utc)
+        logger_info_msg = f"Using default full year: {year}"
     else:
         logger_info_msg = f"Using given time range: {start_time} bis {end_time}"
-        if start_time.tzinfo is None:
-            start_time = start_time.replace(tzinfo=timezone.utc)
-        if end_time.tzinfo is None:
-            end_time = end_time.replace(tzinfo=timezone.utc)
+
+    # Sicherstellen, dass Zeitstempel immer timezone-aware sind
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
 
     period = (
         start_time.strftime("%Y-%m-%d %H:%M"),
-        end_time.strftime("%Y-%m-%d %H:%M")
-    )
+        end_time.strftime("%Y-%m-%d %H:%M"))
 
     # 5. Initialize Config
     config = PipelineConfig(
@@ -106,7 +109,7 @@ def main(start_time: Optional[datetime] = None,
     # --- PHASE 1: DOWNLOAD ---
     if config.run_phases["download"]:
         logger.info(f"=== STARTING DOWNLOAD ({config.start} to {config.end}) ===")
-        client = EntsoeFileClientAdapter(debug= False, target_zones= config.target_zones, year = 2024)
+        client = EntsoeFileClientAdapter(debug= False, target_zones= config.target_zones, year = year)
 
         download_generation_demand(client, config)
         download_flows(client, config,"commercial", dayahead=False)
@@ -161,4 +164,4 @@ def main(start_time: Optional[datetime] = None,
         perform_post_processing_aggregation(config)
 
 if __name__ == "__main__":
-    main(start_time=None, end_time=None)
+    main(year = 2024)
