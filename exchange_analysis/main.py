@@ -41,7 +41,9 @@ def main(start_time: Optional[datetime] = None,
          end_time: Optional[datetime] = None,
          year: Optional[int] = None,
          schema_name: Optional[str] = 'historic-entsoe',
-         debug_mode: Optional[bool] = False):
+         debug_mode: Optional[bool] = False,
+         load_pickle = False,
+         save_pickle = False):
     # ==========================================
     # CONTROL PANEL
     # ==========================================
@@ -91,6 +93,19 @@ def main(start_time: Optional[datetime] = None,
         raw_db_schema_name= f"{schema_name}_raw",
         processed_db_schema_name= schema_name
     )
+
+    if load_pickle:
+        with open("ioHandler.pkl", "rb") as f:
+            io = pickle.load(f)
+
+        config = PipelineConfig(
+            date_range=period,
+            run_flags=my_run_flags,
+            analysis_flags=analysis_subset,
+            debug_mode=debug_mode,
+            raw_db_schema_name=f"{schema_name}_raw",
+            processed_db_schema_name=schema_name,
+            io=io)
 
     # 7. Setup Logging
     timestamp = datetime.now().strftime("%Y-%m-%d")
@@ -142,8 +157,9 @@ def main(start_time: Optional[datetime] = None,
 
       #config.io.push_processed_data_to_db(config)
 
-    with open("ioHandler.pkl", "wb") as f:
-        pickle.dump(config.io, f)
+    if save_pickle:
+        with open("ioHandler.pkl", "wb") as f:
+            pickle.dump(config.io, f)
 
 
 
