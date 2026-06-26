@@ -20,7 +20,7 @@ def get_connection(retries: int = 5):
         "user": os.getenv("DB_USER"),
         "password": os.getenv("DB_PASSWORD"),
         "host": "localhost",
-        "port":  os.getenv("7432")
+        "port":  "7432"
     }
     for trial in range(retries):
         try:
