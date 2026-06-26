@@ -133,7 +133,7 @@ def main(start_time: Optional[datetime] = None,
 
        # fetch_simple_metrics(client, config)
 
-        #config.io.push_raw_data_to_db(config)
+        config.io.push_raw_data_to_db(config)
 
     # --- PHASE 2: PROCESS ---
     gen_data, final_comm, final_phys = None, None, None
@@ -155,7 +155,7 @@ def main(start_time: Optional[datetime] = None,
         raw_phys = process_flows(config, "physical")
         final_phys = balance_flows_symmetry(raw_phys, config, "physical")
 
-      #config.io.push_processed_data_to_db(config)
+      config.io.push_processed_data_to_db(config)
 
     if save_pickle:
         with open("ioHandler.pkl", "wb") as f:
@@ -170,16 +170,16 @@ def main(start_time: Optional[datetime] = None,
             logger.warning("Alle Analyse-Module werden aufgrund fehlender Zeitüberschneidung übersprungen.")
         else:
             logger.info("\n=== STARTING ANALYSIS ===")
-            #if config.analysis_flags["zone_to_gen_type_analysis"]:
-                #perform_decomposition_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm)
-            #if config.analysis_flags["ac_flow_tracing_analysis"]:
-               # perform_aggregated_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
+            if config.analysis_flags["zone_to_gen_type_analysis"]:
+                perform_decomposition_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm)
+            if config.analysis_flags["ac_flow_tracing_analysis"]:
+               perform_aggregated_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
             if config.analysis_flags["dc_flow_tracing_analysis"]:
                 perform_direct_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
             if config.analysis_flags["pooling_analysis"]:
                 perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
 
-    #config.io.push_analysis_data(config)
+    config.io.push_analysis_data(config)
     
     if config.run_phases["post_processing"]:
         perform_post_processing_aggregation(config)
