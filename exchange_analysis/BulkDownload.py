@@ -87,17 +87,17 @@ class EntsoeFileClientAdapter:
         if quarter is not None:
             self.valid_file_starts = [str(year) + '_' + str(i + (quarter-1) * 3) for i in range(1,4)]
 
-        self.load_dfs = self.download_load(year = self.year)
-        self.gen_dfs = self.download_generation(year = self.year)
+        self.load_dfs = self.download_load()
+        self.gen_dfs = self.download_generation()
 
         self.commercial_flows_dayahead =None
         self.commercial_flows = None
         self.physical_flows = None
 
-        self.download_scheduled_exchanges(target_zones = target_zones, year = self.year)
-        self.download_physical_flows(target_zones = target_zones, year = self.year)
+        self.download_scheduled_exchanges(target_zones = target_zones)
+        self.download_physical_flows(target_zones = target_zones)
 
-    def download_load(self,year = None):
+    def download_load(self):
         folder_name = 'ActualTotalLoad_6.1.A_r3'
         file_list = self.client.list_folder(folder_name)
 
@@ -161,7 +161,7 @@ class EntsoeFileClientAdapter:
         else:
             return df
 
-    def download_generation(self, year = None):
+    def download_generation(self):
         folder_name = 'AggregatedGenerationPerType_16.1.B_C_r3'
         file_list = self.client.list_folder(folder_name)
 
@@ -244,7 +244,7 @@ class EntsoeFileClientAdapter:
         else:
             return df
 
-    def download_scheduled_exchanges(self, target_zones = None, year = None):
+    def download_scheduled_exchanges(self, target_zones = None):
         folder_name = 'CommercialSchedules_12.1.F_r3 '
         file_list = self.client.list_folder(folder_name)
 
@@ -342,7 +342,7 @@ class EntsoeFileClientAdapter:
             commercial_flows_dayahead[f"{bz}_raw_commercial_flows_dayahead"] = df
         self.commercial_flows_dayahead = commercial_flows_dayahead
 
-    def download_physical_flows(self, target_zones=None, year = None):
+    def download_physical_flows(self, target_zones=None):
         folder_name = 'PhysicalFlows_12.1.G_r3 '
         file_list = self.client.list_folder(folder_name)
 
