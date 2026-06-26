@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple, Any, Callable
 from shared_utils.postgres_utils import df_to_timescale
+import gc;
 
 logger = logging.getLogger(__name__)
 
@@ -718,15 +719,24 @@ class IOHandler:
             iet_pz_chunks.append(merged)
 
         if iet_pz_chunks:
-            iet_pz_df = pd.concat(iet_pz_chunks, ignore_index=True)
-            for mname in measure_names:
-                if mname not in iet_pz_df.columns:
-                    iet_pz_df[mname] = np.nan
-            iet_pz_df = iet_pz_df[["time", "Importer", "Exporter", "type"] + measure_names]
-            df_to_timescale(iet_pz_df, "Import_Export_per_type_per_zone", schema_name, fillna=True)
-            logger.info("Import_Export_per_type_per_zone pushed (%d rows).", len(iet_pz_df))
-        else:
-            logger.warning("No data found for Import_Export_per_type_per_zone.")
+            total_rows = 0
+            for chunk_df in iet_pz_chunks:
+                # Ensure all measure columns exist in the chunk
+                for mname in measure_names:
+                    if mname not in chunk_df.columns:
+                        chunk_df[mname] = np.nan
+
+                # Standardize column order
+                final_chunk = chunk_df[["time", "Importer", "Exporter", "type"] + measure_names]
+
+                # Push immediately and release memory
+                df_to_timescale(final_chunk, "Import_Export_per_type_per_zone", schema_name, fillna=True)
+                total_rows += len(final_chunk)
+
+                del final_chunk, chunk_df
+                gc.collect()  # Force garbage collection
+
+            logger.info("Import_Export_per_type_per_zone pushed (%d rows).", total_rows)
 
         logger.info("Analysis data transformation and DB push completed.")
 # LOGGING & API UTILS 
