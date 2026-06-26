@@ -19,8 +19,8 @@ def get_connection(retries: int = 5):
         "dbname": os.getenv("DB_NAME"),
         "user": os.getenv("DB_USER"),
         "password": os.getenv("DB_PASSWORD"),
-        "host": "open-data-17_stag",
-        "port":  os.getenv("DB_PORT")
+        "host": "localhost",
+        "port":  os.getenv("7432")
     }
     for trial in range(retries):
         try:
