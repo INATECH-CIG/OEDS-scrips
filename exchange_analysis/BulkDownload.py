@@ -187,12 +187,21 @@ class EntsoeFileClientAdapter:
                 "DateTime(UTC)",
                 "AreaCode",
                 "ProductionType",
-                "ActualGenerationOutput[MW]"
+                "ActualGenerationOutput[MW]",
+                "ActualConsumption[MW]"
             ]]
 
             # Convert generation output to numeric
             df["ActualGenerationOutput[MW]"] = pd.to_numeric(
                 df["ActualGenerationOutput[MW]"], errors="coerce"
+            )
+
+            df["ActualConsumption[MW]"] = pd.to_numeric(
+                df["ActualConsumption[MW]"], errors="coerce"
+            )
+
+            df["NetGeneration[MW]"] = (
+                    df["ActualGenerationOutput[MW]"] - df["ActualConsumption[MW]"]
             )
 
             # Map area codes to readable names and drop failed mappings
@@ -215,7 +224,7 @@ class EntsoeFileClientAdapter:
             wide = group.pivot_table(
                 index="DateTime(UTC)",
                 columns="ProductionType",
-                values="ActualGenerationOutput[MW]",
+                values="NetGeneration[MW]",
                 aggfunc="sum"
             )
 
