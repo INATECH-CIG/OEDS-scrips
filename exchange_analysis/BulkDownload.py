@@ -75,7 +75,7 @@ class EntsoeFileClientAdapter:
     but reads data from the ENTSO-E Transparency FTP/file bulk downloads.
     """
 
-    def __init__(self, debug = False, target_zones = None, year = None, quarter = None):
+    def __init__(self, debug = False, target_zones = None, year = None, months = None):
         self.debug = debug
         self.client = client = EntsoeFileClient(
             'niklas.gerlach@email.uni-freiburg.de',
@@ -84,8 +84,8 @@ class EntsoeFileClientAdapter:
         if year is not None:
             self.valid_file_starts = [year]
 
-        if quarter is not None:
-            self.valid_file_starts = [str(year) + '_' + str(i + (quarter-1) * 3) for i in range(1,4)]
+        if months is not None:
+            self.valid_file_starts = [str(year) + '_' + month for month in months]
 
         self.load_dfs = self.download_load()
         self.gen_dfs = self.download_generation()
