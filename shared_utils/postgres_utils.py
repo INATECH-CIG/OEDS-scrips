@@ -97,13 +97,13 @@ def df_to_timescale(df, tablename, schema_name ='public', fillna = False):
     ensure_schema(schema_name, 'readonly', cur, conn)
     ensure_table(tablename, schema_name, df, cur, conn)
 
+    if fillna:
+    numeric_cols = df.select_dtypes(include='number').columns
+    df[numeric_cols] = df[numeric_cols].fillna(0)
+
     buffer = StringIO()
     df.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
-
-    if fillna:
-        numeric_cols = df.select_dtypes(include='number').columns
-        df[numeric_cols] = df[numeric_cols].fillna(0)
 
     ### delete old entries
     if "time" in df.columns:
