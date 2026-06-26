@@ -40,6 +40,7 @@ from exchange_analysis.data_analysis import (
 def main(start_time: Optional[datetime] = None,
          end_time: Optional[datetime] = None,
          year: Optional[int] = None,
+         quarter: Optional[int] = None,
          schema_name: Optional[str] = 'historic-entsoe',
          debug_mode: Optional[bool] = False,
          load_pickle = False,
@@ -124,7 +125,7 @@ def main(start_time: Optional[datetime] = None,
     # --- PHASE 1: DOWNLOAD ---
     if config.run_phases["download"]:
         logger.info(f"=== STARTING DOWNLOAD ({config.start} to {config.end}) ===")
-        client = EntsoeFileClientAdapter(debug= False, target_zones= config.target_zones, year = year)
+        client = EntsoeFileClientAdapter(debug= False, target_zones= config.target_zones, year = year, quarter=quarter)
 
         download_generation_demand(client, config)
         download_flows(client, config,"commercial", dayahead=False)
@@ -155,7 +156,7 @@ def main(start_time: Optional[datetime] = None,
         raw_phys = process_flows(config, "physical")
         final_phys = balance_flows_symmetry(raw_phys, config, "physical")
 
-      config.io.push_processed_data_to_db(config)
+        config.io.push_processed_data_to_db(config)
 
     if save_pickle:
         with open("ioHandler.pkl", "wb") as f:
@@ -185,4 +186,4 @@ def main(start_time: Optional[datetime] = None,
         perform_post_processing_aggregation(config)
 
 if __name__ == "__main__":
-    main(year = 2024)
+    main(year = 2024, quarter= 1)

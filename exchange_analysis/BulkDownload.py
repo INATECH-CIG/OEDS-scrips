@@ -75,14 +75,17 @@ class EntsoeFileClientAdapter:
     but reads data from the ENTSO-E Transparency FTP/file bulk downloads.
     """
 
-    def __init__(self, debug = False, target_zones = None, year = None):
+    def __init__(self, debug = False, target_zones = None, year = None, quarter = None):
         self.debug = debug
         self.client = client = EntsoeFileClient(
             'niklas.gerlach@email.uni-freiburg.de',
             pw)
 
         if year is not None:
-            self.year = year
+            self.valid_file_starts = [year]
+
+        if quarter is not None:
+            self.valid_file_starts = [str(year) + '_' + str(i + (quarter-1) * 3) for i in range(1,4)]
 
         self.load_dfs = self.download_load(year = self.year)
         self.gen_dfs = self.download_generation(year = self.year)
@@ -104,7 +107,7 @@ class EntsoeFileClientAdapter:
             count += 1
             if count > 10 and self.debug:
                 break
-            if not file.startswith(str(year)):
+            if not any(file.startswith(p) for p in self.valid_file_starts):
                 continue
 
             print(file)
@@ -169,7 +172,7 @@ class EntsoeFileClientAdapter:
             count += 1
             if count > 10 and self.debug:
                 break
-            if not file.startswith(str(year)):
+            if not any(file.startswith(p) for p in self.valid_file_starts):
                 continue
 
 
@@ -264,7 +267,7 @@ class EntsoeFileClientAdapter:
             count += 1
             if count > 10 and self.debug:
                 break
-            if not file.startswith(str(year)):
+            if not any(file.startswith(p) for p in self.valid_file_starts):
                 continue
 
 
@@ -362,7 +365,7 @@ class EntsoeFileClientAdapter:
             if count > 10 and self.debug:
                 break
 
-            if not file.startswith(str(year)):
+            if not any(file.startswith(p) for p in self.valid_file_starts):
                 continue
 
             print(file)
