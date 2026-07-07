@@ -379,8 +379,16 @@ def perform_direct_flow_tracing(
             
             # Extract absolute generation and load, defaulting to 0.0 for missing temporal indices
             if bz in gen_dfs_loaded and t in gen_dfs_loaded[bz].index:
-                gen_val = float(gen_dfs_loaded[bz].at[t, "Total Generation"])
-                load_val = float(gen_dfs_loaded[bz].at[t, "Total Load"])
+                if "Total Generation" in gen_dfs_loaded[bz].columns:
+                    gen_val = float(gen_dfs_loaded[bz].at[t, "Total Generation"])
+                else:
+                    gen_val = 0.0
+                    logger.warning(f"Missing 'Total Generation' for {bz} at {t}, defaulting to 0.0")
+                if "Total Load" in gen_dfs_loaded[bz].columns:
+                    load_val = float(gen_dfs_loaded[bz].at[t, "Total Load"])
+                else:
+                    load_val = 0.0
+                    logger.warning(f"Missing 'Total Load' for {bz} at {t}, defaulting to 0.0")
             else:
                 gen_val = 0.0
                 load_val = 0.0
