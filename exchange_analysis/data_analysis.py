@@ -310,14 +310,6 @@ def perform_aggregated_flow_tracing(
                 net_imps.append(-net_exp)
             Pin.append(Pin_arr)
             A.append(A_arr)
-            if net_exp > 0:
-                Pin_arr[config.zones.index(bz)], A_arr[config.zones.index(bz)] = net_exp, exports
-                net_imps.append(0.0)
-            else:
-                A_arr[config.zones.index(bz)] = exports + abs(net_exp)
-                net_imps.append(-net_exp)
-            Pin.append(Pin_arr)
-            A.append(A_arr)
 
 
         # Evaluate diagonal elements for singularities and apply mathematical smoothing if required
