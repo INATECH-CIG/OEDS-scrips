@@ -64,39 +64,69 @@ def ensure_schema(schemaname, readonly_user,  cur, conn):
     )
 
 
-def ensure_table(tablename, schemaname, df, cur,conn):
+def ensure_table(tablename, schemaname, df, cur, conn):
     """
-    ensures that for a given df, there exists a corresponding table in the timescale db
+    Ensures that for a given df, there exists a corresponding table in the timescale db.
+    If the table exists, it dynamically adds any missing columns to prevent schema misalignment.
     """
-    col_defs = []
-    for col, dtype in zip(df.columns, df.dtypes):
-        if pd.api.types.is_integer_dtype(dtype):
-            sql_type = "BIGINT"
-        elif pd.api.types.is_float_dtype(dtype):
-            sql_type = "DOUBLE PRECISION"
-        elif pd.api.types.is_datetime64_any_dtype(dtype):
-            sql_type = "TIMESTAMPTZ"
-        else:
-            sql_type = "TEXT"
-        col_defs.append(f'"{col}" {sql_type}')
+    # Check if table already exists and get its current columns
+    cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = %s
+                  AND table_name = %s
+                """, (schemaname, tablename))
+    existing_cols = {row[0].lower() for row in cur.fetchall()}
 
-    create_sql = sql.SQL(
-        "CREATE TABLE IF NOT EXISTS {}.{}({})"
-    ).format(
-        sql.Identifier(schemaname),
-        sql.Identifier(tablename),
-        sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
-    )
-    sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
+    if not existing_cols:
+        # Table doesn't exist — create it from scratch
+        col_defs = []
+        for col, dtype in zip(df.columns, df.dtypes):
+            if pd.api.types.is_integer_dtype(dtype):
+                sql_type = "BIGINT"
+            elif pd.api.types.is_float_dtype(dtype):
+                sql_type = "DOUBLE PRECISION"
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                sql_type = "TIMESTAMPTZ"
+            else:
+                sql_type = "TEXT"
+            col_defs.append(f'"{col}" {sql_type}')
 
-    cur.execute(create_sql)
-    conn.commit()
+        create_sql = sql.SQL(
+            "CREATE TABLE {}.{}({})"
+        ).format(
+            sql.Identifier(schemaname),
+            sql.Identifier(tablename),
+            sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
+        )
+        cur.execute(create_sql)
+        conn.commit()
 
-    full_table = f'{schemaname}."{tablename}"'
-    hypertable_sql = "SELECT create_hypertable(%s, 'time', if_not_exists => TRUE);"
-    cur.execute(hypertable_sql, (full_table,))
-    conn.commit()
+        full_table = f'{schemaname}."{tablename}"'
+        hypertable_sql = "SELECT create_hypertable(%s, 'time', if_not_exists => TRUE);"
+        cur.execute(hypertable_sql, (full_table,))
+        conn.commit()
+    else:
+        # Table exists — add any missing columns to accommodate the new DataFrame
+        for col, dtype in zip(df.columns, df.dtypes):
+            if col.lower() not in existing_cols:
+                if pd.api.types.is_integer_dtype(dtype):
+                    sql_type = "BIGINT"
+                elif pd.api.types.is_float_dtype(dtype):
+                    sql_type = "DOUBLE PRECISION"
+                elif pd.api.types.is_datetime64_any_dtype(dtype):
+                    sql_type = "TIMESTAMPTZ"
+                else:
+                    sql_type = "TEXT"
 
+                alter_sql = sql.SQL('ALTER TABLE {}.{} ADD COLUMN "{}" {}').format(
+                    sql.Identifier(schemaname),
+                    sql.Identifier(tablename),
+                    sql.Identifier(col),
+                    sql.SQL(sql_type)
+                )
+                cur.execute(alter_sql)
+        conn.commit()
 def df_to_timescale(df, tablename, schema_name ='public', fillna = False):
     """
     Writes a dataframe into a timescale db table
@@ -145,11 +175,14 @@ def df_to_timescale(df, tablename, schema_name ='public', fillna = False):
     ### end of delete
 
     ### insert new entries
+    col_identifiers = sql.SQL(', ').join(sql.Identifier(c) for c in df.columns)
+
     cur.copy_expert(
-        sql.SQL("COPY {}.{} FROM STDIN WITH (FORMAT CSV)")
+        sql.SQL("COPY {}.{} ({}) FROM STDIN WITH (FORMAT CSV)")
         .format(
             sql.Identifier(schema_name),
-            sql.Identifier(tablename)
+            sql.Identifier(tablename),
+            col_identifiers
         ),
         buffer
     )
