@@ -584,7 +584,7 @@ class IOHandler:
                 if mname not in ie_zone_df.columns:
                     ie_zone_df[mname] = np.nan
             ie_zone_df = ie_zone_df[["time", "Importer", "Exporter"] + measure_names]
-            df_to_timescale(ie_zone_df, "Import_Export_per_Zone", schema_name, fillna=True)
+            df_to_timescale(ie_zone_df, "Import_Export_per_Zone", schema_name, fillna=True, unique_keys=("time", "Importer", "Exporter"))
             logger.info("Import_Export_per_Zone pushed (%d rows).", len(ie_zone_df))
         else:
             logger.warning("No data found for Import_Export_per_Zone.")
@@ -620,7 +620,7 @@ class IOHandler:
                 if mname not in imp_type_df.columns:
                     imp_type_df[mname] = np.nan
             imp_type_df = imp_type_df[["time", "Importer", "type"] + measure_names]
-            df_to_timescale(imp_type_df, "Import_per_type", schema_name, fillna=True)
+            df_to_timescale(imp_type_df, "Import_per_type", schema_name, fillna=True, unique_keys=("time", "Importer", "type"))
             logger.info("Import_per_type pushed (%d rows).", len(imp_type_df))
         else:
             logger.warning("No data found for Import_per_type.")
@@ -667,7 +667,7 @@ class IOHandler:
                 if mname not in exp_type_df.columns:
                     exp_type_df[mname] = np.nan
             exp_type_df = exp_type_df[["time", "Exporter", "type"] + measure_names]
-            df_to_timescale(exp_type_df, "Export_per_type", schema_name, fillna=True)
+            df_to_timescale(exp_type_df, "Export_per_type", schema_name, fillna=True, unique_keys=("time", "Exporter", "type"))
             logger.info("Export_per_type pushed (%d rows).", len(exp_type_df))
         else:
             logger.warning("No data found for Export_per_type.")
@@ -730,7 +730,7 @@ class IOHandler:
                 final_chunk = chunk_df[["time", "Importer", "Exporter", "type"] + measure_names]
 
                 # Push immediately and release memory
-                df_to_timescale(final_chunk, "Import_Export_per_type_per_zone", schema_name, fillna=True)
+                df_to_timescale(final_chunk, "Import_Export_per_type_per_zone", schema_name, fillna=True, unique_keys=("time", "Importer", "Exporter", "type"))
                 total_rows += len(final_chunk)
 
                 del final_chunk, chunk_df

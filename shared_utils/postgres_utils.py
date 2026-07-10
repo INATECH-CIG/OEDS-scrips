@@ -97,9 +97,11 @@ def ensure_table(tablename, schemaname, df, cur,conn):
     cur.execute(hypertable_sql, (full_table,))
     conn.commit()
 
-def df_to_timescale(df, tablename, schema_name ='public', fillna = False):
+def df_to_timescale(df, tablename, schema_name='public', fillna=False, unique_keys=None):
     """
-    Writes a dataframe into a timescale db table
+    Writes a dataframe into a timescale db table.
+    If unique_keys are provided, performs a targeted upsert by deleting
+    overlapping rows in the main table before inserting.
     """
     conn = get_connection()
     cur = conn.cursor()
@@ -115,44 +117,86 @@ def df_to_timescale(df, tablename, schema_name ='public', fillna = False):
     df.to_csv(buffer, index=False, header=False)
     buffer.seek(0)
 
-    ### delete old entries
-    if "time" in df.columns:
-        min_time = df.time.min().strftime('%Y-%m-%d %H:%M:%S%z')
-        max_time = df.time.max().strftime('%Y-%m-%d %H:%M:%S%z')
+    if unique_keys:
+        # --- UPSERT LOGIC VIA STAGING TABLE ---
+        temp_table_name = f"temp_{tablename}"
 
-        query = sql.SQL("""
-                        DELETE
-                        FROM {schema}.{table}
-                        WHERE time >= %s
-                          AND time <= %s
-                        """).format(
-            schema=sql.Identifier(schema_name),
-            table=sql.Identifier(tablename)
-        )
-
-        cur.execute(query, (min_time, max_time))
-
-    else:
-        query = sql.SQL("""
-                        DELETE
-                        FROM {schema}.{table}
-                        """).format(
-            schema=sql.Identifier(schema_name),
-            table=sql.Identifier(tablename)
-        )
-
-        cur.execute(query)
-    ### end of delete
-
-    ### insert new entries
-    cur.copy_expert(
-        sql.SQL("COPY {}.{} FROM STDIN WITH (FORMAT CSV)")
-        .format(
+        # 1. Create a temp table that mimics the main table
+        cur.execute(sql.SQL("DROP TABLE IF EXISTS {};").format(sql.Identifier(temp_table_name)))
+        cur.execute(sql.SQL("CREATE TEMP TABLE {} (LIKE {}.{});").format(
+            sql.Identifier(temp_table_name),
             sql.Identifier(schema_name),
             sql.Identifier(tablename)
-        ),
-        buffer
-    )
+        ))
+
+        # 2. COPY chunk into temp table
+        cur.copy_expert(
+            sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV)").format(sql.Identifier(temp_table_name)),
+            buffer
+        )
+
+        # 3. Delete conflicts from main table based on unique_keys
+        # Builds: main."time" = temp."time" AND main."Importer" = temp."Importer" ...
+        join_conditions = sql.SQL(" AND ").join(
+            sql.SQL("main.{} = temp.{}").format(sql.Identifier(k), sql.Identifier(k))
+            for k in unique_keys
+        )
+
+        cur.execute(sql.SQL("""
+                            DELETE
+                            FROM {}.{} AS main
+                                USING {} AS temp
+                            WHERE {};
+                            """).format(
+            sql.Identifier(schema_name),
+            sql.Identifier(tablename),
+            sql.Identifier(temp_table_name),
+            join_conditions
+        ))
+
+        # 4. Insert into main table
+        cur.execute(sql.SQL("""
+                            INSERT INTO {}.{}
+                            SELECT *
+                            FROM {};
+                            """).format(
+            sql.Identifier(schema_name),
+            sql.Identifier(tablename),
+            sql.Identifier(temp_table_name)
+        ))
+
+        # 5. Cleanup
+        cur.execute(sql.SQL("DROP TABLE {};").format(sql.Identifier(temp_table_name)))
+
+    else:
+        # --- OLD LOGIC (FALLBACK) ---
+        if "time" in df.columns:
+            min_time = df.time.min().strftime('%Y-%m-%d %H:%M:%S%z')
+            max_time = df.time.max().strftime('%Y-%m-%d %H:%M:%S%z')
+            query = sql.SQL("""
+                            DELETE
+                            FROM {schema}.{table}
+                            WHERE time >= %s
+                              AND time <= %s
+                            """).format(
+                schema=sql.Identifier(schema_name),
+                table=sql.Identifier(tablename)
+            )
+            cur.execute(query, (min_time, max_time))
+        else:
+            query = sql.SQL("DELETE FROM {schema}.{table}").format(
+                schema=sql.Identifier(schema_name),
+                table=sql.Identifier(tablename)
+            )
+            cur.execute(query)
+
+        cur.copy_expert(
+            sql.SQL("COPY {}.{} FROM STDIN WITH (FORMAT CSV)").format(
+                sql.Identifier(schema_name),
+                sql.Identifier(tablename)
+            ),
+            buffer
+        )
 
     conn.commit()
     cur.close()
