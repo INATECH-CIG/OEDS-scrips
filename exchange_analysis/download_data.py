@@ -510,31 +510,11 @@ def _download_GB_demand_data(date: pd.Timestamp) -> Optional[pd.DataFrame]:
 def fetch_simple_metrics(client: EntsoePandasClient, config: PipelineConfig) -> None:
     """Fetches Prices and Net Positions for Target Zones."""
     if not config.data_types["metrics"]: return
-    
-    for name, method, kwargs in [
-        ("net_positions_dayahead", client.query_net_position, {"dayahead":True}), 
-        ("market_price_dayahead", client.query_day_ahead_prices, {})
-    ]:
-        out_dir = config.get_output_path(name)
-        
-        for bz in config.target_zones:
-            logger.info(f"[Download] Fetching {name} for {bz}...")
-            df: Optional[pd.DataFrame] = safe_query(method, context=f"{name} {bz}", country_code=bz, start=config.start, end=config.end, **kwargs)
-            
-            if df is not None:
-                if isinstance(df, pd.Series): 
-                    df = df.to_frame(name="Value")
-                
-                df.index = pd.to_datetime(df.index, utc=True)
-                
-                # Resolves reporting inconsistencies for Italian zones in 2025
-                if name == "net_positions_dayahead" and bz.startswith("IT"):
-                    mask_2025 = df.index.year == 2025
-                    if mask_2025.any():
-                        logger.info(f"  -> Adjusting sign convention for {bz} 2025 Net Positions.")
-                        df.loc[mask_2025] = df.loc[mask_2025] * -1
-                
-                df = df.apply(pd.to_numeric, errors='coerce')
-                df_resampled = df.resample("1h").mean(numeric_only=True)
-                
-                config.io.save(df_resampled, f"{bz}_{name}", out_dir, config)
+
+    for table_name, df in client.net_positions_dayahead_dict.items():
+        df = df.resample("1h").mean(numeric_only=True)
+        config.io.save(df, table_name, directory = '', config = config)
+
+    for table_name, df in client.market_price_dayahead_dict.items():
+        df = df.resample("1h").mean(numeric_only=True)
+        config.io.save(df, table_name,directory = '', config = config)

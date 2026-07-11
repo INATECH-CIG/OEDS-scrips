@@ -97,6 +97,14 @@ class EntsoeFileClientAdapter:
         self.download_scheduled_exchanges(target_zones = target_zones)
         self.download_physical_flows(target_zones = target_zones)
 
+        self.market_price_dayahead_dict = {}
+        self.download_market_price_da()
+
+        self.net_positions_dayahead_dict = {}
+        self.download_net_positions_da()
+
+
+
     def download_load(self):
         folder_name = 'ActualTotalLoad_6.1.A_r3'
         file_list = self.client.list_folder(folder_name)
@@ -431,3 +439,97 @@ class EntsoeFileClientAdapter:
             physical_flows[f"{bz}_raw_physical_flows"] = df
 
         self.physical_flows = physical_flows
+
+    def download_net_positions_da(self, target_zones=None):
+        folder_name = 'ImplicitAllocationsNetPositions_12.1.E_r3'
+        file_list = self.client.list_folder(folder_name)
+
+        count = 0
+        for file, id in file_list.items():
+            count += 1
+            if count > 10 and self.debug:
+                break
+
+            if not any(file.startswith(p) for p in self.valid_file_starts):
+                continue
+
+            print(file)
+            df = self.client.download_single_file(folder_name, file)
+
+
+
+
+            # only use data for bidding zones
+            df = df[df["AreaTypeCode"].str.contains("BZN", na=False)]
+
+            df.index = pd.to_datetime(df["DateTime(UTC)"], utc=True)
+            df.index.name = "time"
+
+            df = df[["AreaCode", "NetPosition[MW]"]]
+
+            df = df.rename(columns={"NetPosition[MW]": "Value"})
+            df.Value = pd.to_numeric(df.Value, errors="coerce")
+
+            df["AreaCode"] = df["AreaCode"].map(code_to_area)
+            df = df.dropna(subset=["AreaCode"])
+
+            for area_code, group_df in df.groupby("AreaCode"):
+                key = f"{area_code}_net_positions_dayahead"
+
+                if key not in self.market_price_dayahead_dict:
+                    self.net_positions_dayahead_dict[key] = group_df
+                else:
+                    self.net_positions_dayahead_dict[key] = pd.concat(
+                        [self.net_positions_dayahead_dict[key], group_df]
+                    )
+
+
+            for key in self.market_price_dayahead_dict.keys():
+                if key.startswith("IT"):
+                    df = self.market_price_dayahead_dict[key]
+                    mask_2025 = df.index.year == 2025
+                    if mask_2025.any():
+                        print.info(f"  -> Adjusting sign convention for {key}")
+                        df.loc[mask_2025] = df.loc[mask_2025] * -1
+                        self.market_price_dayahead_dict[key] = df
+
+    def download_market_price_da(self):
+        folder_name = 'EnergyPrices_12.1.D_r3'
+        file_list = self.client.list_folder(folder_name)
+
+
+        count = 0
+        for file, id in file_list.items():
+            count += 1
+            if count > 10 and self.debug:
+                break
+
+            if not any(file.startswith(p) for p in self.valid_file_starts):
+                continue
+
+            print(file)
+            df = self.client.download_single_file(folder_name, file)
+
+
+            # only use data for bidding zones
+            df = df[df["AreaTypeCode"].str.contains("BZN", na=False)]
+
+            df.index = pd.to_datetime(df["DateTime(UTC)"], utc=True)
+            df.index.name = "time"
+            df = df[["AreaCode", 'Price[Currency/MWh]']]
+
+            df = df.rename(columns={'Price[Currency/MWh]': "Value"})
+            df.Value = pd.to_numeric(df.Value, errors="coerce")
+
+            df["AreaCode"] = df["AreaCode"].map(code_to_area)
+            df = df.dropna(subset=["AreaCode"])
+
+            for area_code, group_df in df.groupby("AreaCode"):
+                key = f"{area_code}_market_price_dayahead"
+
+                if key not in self.market_price_dayahead_dict:
+                    self.market_price_dayahead_dict[key] = group_df
+                else:
+                    self.market_price_dayahead_dict[key] = pd.concat(
+                        [self.market_price_dayahead_dict[key], group_df]
+                    )

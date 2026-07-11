@@ -70,7 +70,7 @@ def main(start_time: Optional[datetime] = None,
 
     if start_time is None or end_time is None:
         start_time = datetime(year, 1, 1, 0, 0, tzinfo=timezone.utc)
-        end_time = datetime(year, 12, 31, 23, 59, tzinfo=timezone.utc)
+        end_time = datetime(year, 1, 31, 23, 59, tzinfo=timezone.utc)
         logger_info_msg = f"Using default full year: {year}"
     else:
         logger_info_msg = f"Using given time range: {start_time} bis {end_time}"
@@ -132,7 +132,7 @@ def main(start_time: Optional[datetime] = None,
         download_flows(client, config, "commercial", dayahead=True)
         download_flows(client, config, "physical")
 
-       # fetch_simple_metrics(client, config)
+        fetch_simple_metrics(client, config)
 
         config.io.push_raw_data_to_db(config)
 
