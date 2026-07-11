@@ -68,9 +68,10 @@ def main(start_time: Optional[datetime] = None,
     if year is None:
         year = datetime.now(timezone.utc).year
 
+    month = int(months[0])
     if start_time is None or end_time is None:
-        start_time = datetime(year, 1, 1, 0, 0, tzinfo=timezone.utc)
-        end_time = datetime(year, 1, 31, 23, 59, tzinfo=timezone.utc)
+        start_time = datetime(year, month, 1, 0, 0, tzinfo=timezone.utc)
+        end_time = datetime(year, month, 31, 23, 59, tzinfo=timezone.utc)
         logger_info_msg = f"Using default full year: {year}"
     else:
         logger_info_msg = f"Using given time range: {start_time} bis {end_time}"
@@ -183,4 +184,11 @@ def main(start_time: Optional[datetime] = None,
     config.io.push_analysis_data(config)
 
 if __name__ == "__main__":
-    main(year = 2024, months = ['01'])
+    for year in [2020, 2023, 2024, 2025]:
+        for month in ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']:
+            try:
+                main(year = 2024, months = [month], schema_name='deb3')
+            except Exception as e:
+                print(f"Error for year {year} and month {month}:")
+                print(e)
+                print('---------------------------------------')
