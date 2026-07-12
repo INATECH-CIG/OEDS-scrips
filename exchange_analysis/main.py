@@ -184,10 +184,10 @@ def main(start_time: Optional[datetime] = None,
     config.io.push_analysis_data(config)
 
 if __name__ == "__main__":
-    for year in [2020, 2023, 2024, 2025]:
+    for year in [2024, 2025]:
         for month in ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']:
             try:
-                main(year = 2024, months = [month], schema_name='deb3')
+                main(year = year, months = [month])
             except Exception as e:
                 print(f"Error for year {year} and month {month}:")
                 print(e)
