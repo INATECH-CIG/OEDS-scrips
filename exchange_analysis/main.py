@@ -18,6 +18,8 @@ import logging
 from typing import Optional
 from exchange_analysis.BulkDownload import EntsoeFileClientAdapter
 from prefect import flow
+import calendar
+from datetime import datetime, timezone
 import pickle
 
 # --- MODULE IMPORTS ---
@@ -71,10 +73,13 @@ def main(start_time: Optional[datetime] = None,
     month = int(months[0])
     if start_time is None or end_time is None:
         start_time = datetime(year, month, 1, 0, 0, tzinfo=timezone.utc)
-        end_time = datetime(year, month, 31, 23, 59, tzinfo=timezone.utc)
-        logger_info_msg = f"Using default full year: {year}"
+
+        last_day = calendar.monthrange(year, month)[1]
+        end_time = datetime(year, month, last_day, 23, 59, tzinfo=timezone.utc)
+
+        logger_info_msg = f"Using default full month: {year}-{month:02d}"
     else:
-        logger_info_msg = f"Using given time range: {start_time} bis {end_time}"
+        logger_info_msg = f"Using given time range: {start_time} to {end_time}"
 
     # Sicherstellen, dass Zeitstempel immer timezone-aware sind
     if start_time.tzinfo is None:
