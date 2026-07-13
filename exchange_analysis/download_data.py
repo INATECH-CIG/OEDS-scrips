@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 60
 GB_GENERATION_TYPES = [
     "Biomass", "Fossil Gas", "Fossil Hard coal", "Fossil Oil", 
-    "Hydro Pumped Storage", "Hydro Run-of-river and poundage", 
+    "Hydro Pumped Storage", "Hydro Run-of-river and pondage",
     "Nuclear", "Other", "Solar", "Wind Offshore", "Wind Onshore"
 ]
 
