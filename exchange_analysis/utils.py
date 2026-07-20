@@ -676,7 +676,8 @@ class IOHandler:
         # 4. Import_Export_per_type_per_zone
         #    Source: per_type_per_zone tables (columns = "{exporter}_{type}")
         # ========================================================
-        logger.info("Building Import_Export_per_type_per_zone...")
+        # NOTE: This table is no longer built and pushed because of its heavy memory usage
+        """logger.info("Building Import_Export_per_type_per_zone...")
         iet_pz_chunks = []
 
         for importer in zones:
@@ -727,7 +728,7 @@ class IOHandler:
             df_to_timescale(iet_pz_df, "Import_Export_per_type_per_zone", schema_name, fillna=True)
             logger.info("Import_Export_per_type_per_zone pushed (%d rows).", len(iet_pz_df))
         else:
-            logger.warning("No data found for Import_Export_per_type_per_zone.")
+            logger.warning("No data found for Import_Export_per_type_per_zone.")"""
 
         logger.info("Analysis data transformation and DB push completed.")
 # LOGGING & API UTILS 
