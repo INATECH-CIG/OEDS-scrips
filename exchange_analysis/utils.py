@@ -676,7 +676,8 @@ class IOHandler:
         # 4. Import_Export_per_type_per_zone
         #    Source: per_type_per_zone tables (columns = "{exporter}_{type}")
         # ========================================================
-        logger.info("Building Import_Export_per_type_per_zone...")
+        # NOTE: This table is currently not created and pushed because of its heavy memory usage
+        """logger.info("Building Import_Export_per_type_per_zone...")
         iet_pz_chunks = []
 
         for importer in zones:
@@ -737,7 +738,7 @@ class IOHandler:
                 gc.collect()  # Force garbage collection
 
             logger.info("Import_Export_per_type_per_zone pushed (%d rows).", total_rows)
-
+            """
         logger.info("Analysis data transformation and DB push completed.")
 # LOGGING & API UTILS 
 # ==========================================
