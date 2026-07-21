@@ -240,6 +240,9 @@ class EntsoeFileClientAdapter:
             wide.columns.name = None
             wide = wide.sort_index()
 
+            if pd.to_datetime(wide.index[0]).year == 2024:
+                wide = wide.drop(columns="Energy storage", errors="ignore")
+
             gen_dict[f"{bz}_raw_generation"] = wide
 
         return gen_dict
