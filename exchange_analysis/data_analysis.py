@@ -121,6 +121,10 @@ def perform_decomposition_analysis(
     logger.info("[Decomposition] Calculating generation mix fractions...")
     gen_fractions: Dict[str, pd.DataFrame] = {}
     for bz, df in gen_dfs_loaded.items():
+        if "Total Generation" not in df.columns:
+            logger.warning(
+                f"Missing 'Total Generation' column for {bz}. Skipping generation fraction calculation for this zone.")
+            continue
         total = df["Total Generation"].replace(0, 1)
         fracs = df[[c for c in df.columns if c in config.gen_types_list]].div(total, axis=0)
         if "Storage Discharge" in df.columns: fracs["Storage"] = df["Storage Discharge"] / total
@@ -201,6 +205,9 @@ def _decompose_and_save(
     
     logger.info(f"   -> Calculating source generation fractions...")
     for bz, df in gen_dfs.items():
+        if df.empty or "Total Generation" not in df.columns:
+            logger.warning(f"Missing 'Total Generation' for {bz}. Skipping...")
+            continue
         total = df["Total Generation"].replace(0, 1)
         fracs = df[[c for c in df.columns if c in config.gen_types_list]].div(total, axis=0) 
         if "Storage Discharge" in df.columns: fracs["Storage"] = df["Storage Discharge"] / total
@@ -372,8 +379,16 @@ def perform_direct_flow_tracing(
             
             # Extract absolute generation and load, defaulting to 0.0 for missing temporal indices
             if bz in gen_dfs_loaded and t in gen_dfs_loaded[bz].index:
-                gen_val = float(gen_dfs_loaded[bz].at[t, "Total Generation"])
-                load_val = float(gen_dfs_loaded[bz].at[t, "Total Load"])
+                if "Total Generation" in gen_dfs_loaded[bz].columns:
+                    gen_val = float(gen_dfs_loaded[bz].at[t, "Total Generation"])
+                else:
+                    gen_val = 0.0
+                    logger.warning(f"Missing 'Total Generation' for {bz} at {t}, defaulting to 0.0")
+                if "Total Load" in gen_dfs_loaded[bz].columns:
+                    load_val = float(gen_dfs_loaded[bz].at[t, "Total Load"])
+                else:
+                    load_val = 0.0
+                    logger.warning(f"Missing 'Total Load' for {bz} at {t}, defaulting to 0.0")
             else:
                 gen_val = 0.0
                 load_val = 0.0
@@ -469,7 +484,11 @@ def perform_pooling_analysis(
     gen_fractions: Dict[str, pd.DataFrame] = {}
     for i, (bz, df) in enumerate(gen_dfs_loaded.items()):
         if i % 10 == 0: logger.info(f"   -> Processing fractions for {bz}...")
-        total = df["Total Generation"].replace(0, 1)
+        if "Total Generation" in df.columns:
+            total = df["Total Generation"].replace(0, 1)
+        else:
+            total = 0
+            logger.warning(f"Missing 'Total Generation' for {bz}, defaulting to 0.0")
         fracs = df[[c for c in df.columns if c in config.gen_types_list]].div(total, axis=0) 
         if "Storage Discharge" in df.columns: fracs["Storage"] = df["Storage Discharge"] / total
         gen_fractions[bz] = fracs.loc[:, ~fracs.columns.duplicated()].fillna(0.0)
@@ -590,7 +609,13 @@ def perform_post_processing_aggregation(config: PipelineConfig) -> None:
         df = load_clean(gen_dir / f"{bz}_generation_demand_data_bidding_zones.csv", "processed_generation", bz)
         if df is not None:
             df = df.resample("1h").mean(numeric_only=True).fillna(0)
-            total = df["Total Generation"].replace(0, 1)
+
+            if "Total Generation" in df.columns:
+                total = df["Total Generation"].replace(0, 1)
+            else:
+                total = 0
+                logger.warning(f"Missing 'Total Generation' for {bz}, defaulting to 0.0")
+
             fracs = df[[c for c in df.columns if c in config.gen_types_list]].div(total, axis=0)
             if "Storage Discharge" in df.columns: fracs["Storage"] = df["Storage Discharge"] / total
             gen_fractions[bz] = fracs.loc[:, ~fracs.columns.duplicated()].fillna(0.0)

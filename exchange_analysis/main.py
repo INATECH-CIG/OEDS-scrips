@@ -36,7 +36,10 @@ from exchange_analysis.data_analysis import (
 )
 
 @flow
-def main(start_time: Optional[datetime] = None, end_time: Optional[datetime] = None, debug_mode: Optional[bool] = False):
+def main(start_time: Optional[datetime] = None,
+         end_time: Optional[datetime] = None,
+         schema_name: Optional[str] = 'entsoe',
+         debug_mode: Optional[bool] = False):
     # ==========================================
     # CONTROL PANEL
     # ==========================================
@@ -81,8 +84,8 @@ def main(start_time: Optional[datetime] = None, end_time: Optional[datetime] = N
         run_flags=my_run_flags,
         analysis_flags=analysis_subset,
         debug_mode=debug_mode,
-        raw_db_schema_name='entsoe_raw',
-        processed_db_schema_name= 'entsoe'
+        raw_db_schema_name= f"{schema_name}_raw",
+        processed_db_schema_name= schema_name
     )
 
     # 7. Setup Logging
