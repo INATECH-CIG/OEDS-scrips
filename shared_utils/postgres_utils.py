@@ -17,9 +17,9 @@ load_dotenv(dotenv_path=env_path)
 def get_connection(retries: int = 5):
     conn_params = {
         "dbname": os.getenv("DB_NAME"),
-        "user": 'readonly',
-        "password": 'precise-ignition-hypocrite',
-        "host": "132.230.100.67",
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "host": "localhost",
         "port":  "7432"
     }
     print(conn_params)
