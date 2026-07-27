@@ -463,14 +463,14 @@ class EntsoeFileClientAdapter:
             print(file)
             df = self.client.download_single_file(folder_name, file)
 
-
-
-
             # only use data for bidding zones
             df = df[df["AreaTypeCode"].str.contains("BZN", na=False)]
 
             df.index = pd.to_datetime(df["DateTime(UTC)"], utc=True)
             df.index.name = "time"
+
+            df.loc[df["Direction"] == "Import", "NetPosition[MW]"] *= -1
+            df = df.dropna(subset=["Direction"])
 
             df = df[["AreaCode", "NetPosition[MW]"]]
 
