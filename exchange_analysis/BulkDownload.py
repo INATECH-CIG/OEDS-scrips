@@ -470,7 +470,6 @@ class EntsoeFileClientAdapter:
             df.index.name = "time"
 
             df.loc[df["Direction"] == "Import", "NetPosition[MW]"] *= -1
-            df = df.dropna(subset=["Direction"])
 
             df = df[["AreaCode", "NetPosition[MW]"]]
 
