@@ -22,7 +22,6 @@ def get_connection(retries: int = 5):
         "host": "localhost",
         "port":  "7432"
     }
-    print(conn_params)
     for trial in range(retries):
         try:
             conn = psycopg2.connect(**conn_params)
