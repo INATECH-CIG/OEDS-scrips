@@ -17,11 +17,12 @@ load_dotenv(dotenv_path=env_path)
 def get_connection(retries: int = 5):
     conn_params = {
         "dbname": os.getenv("DB_NAME"),
-        "user": os.getenv("DB_USER"),
-        "password": os.getenv("DB_PASSWORD"),
-        "host": "localhost",
+        "user": 'readonly',
+        "password": 'precise-ignition-hypocrite',
+        "host": "132.230.100.67",
         "port":  "7432"
     }
+    print(conn_params)
     for trial in range(retries):
         try:
             conn = psycopg2.connect(**conn_params)
@@ -64,7 +65,7 @@ def ensure_schema(schemaname, readonly_user,  cur, conn):
     )
 
 
-def ensure_table(tablename, schemaname, df, cur,conn):
+def ensure_table(tablename, schemaname, df, cur, conn):
     """
     ensures that for a given df, there exists a corresponding table in the timescale db
     """
@@ -87,8 +88,6 @@ def ensure_table(tablename, schemaname, df, cur,conn):
         sql.Identifier(tablename),
         sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
     )
-    sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
-
     cur.execute(create_sql)
     conn.commit()
 
@@ -96,6 +95,35 @@ def ensure_table(tablename, schemaname, df, cur,conn):
     hypertable_sql = "SELECT create_hypertable(%s, 'time', if_not_exists => TRUE);"
     cur.execute(hypertable_sql, (full_table,))
     conn.commit()
+
+    # add missing collumns
+    cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = %s
+                  AND table_name = %s
+                """, (schemaname, tablename))
+    existing_cols = {row[0] for row in cur.fetchall()}
+
+    for col, dtype in zip(df.columns, df.dtypes):
+        if col not in existing_cols:
+            if pd.api.types.is_integer_dtype(dtype):
+                sql_type = "BIGINT"
+            elif pd.api.types.is_float_dtype(dtype):
+                sql_type = "DOUBLE PRECISION"
+            elif pd.api.types.is_datetime64_any_dtype(dtype):
+                sql_type = "TIMESTAMPTZ"
+            else:
+                sql_type = "TEXT"
+
+            alter_sql = sql.SQL("ALTER TABLE {}.{} ADD COLUMN {} {}").format(
+                sql.Identifier(schemaname),
+                sql.Identifier(tablename),
+                sql.Identifier(col),
+                sql.SQL(sql_type)
+            )
+            cur.execute(alter_sql)
+            conn.commit()
 
 def df_to_timescale(df, tablename, schema_name='public', fillna=False, unique_keys=None):
     """
