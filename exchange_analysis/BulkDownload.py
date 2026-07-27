@@ -204,9 +204,13 @@ class EntsoeFileClientAdapter:
                 df["ActualGenerationOutput[MW]"], errors="coerce"
             )
 
+            df["ActualGenerationOutput[MW]"] = df["ActualGenerationOutput[MW]"].fillna(0)
+
             df["ActualConsumption[MW]"] = pd.to_numeric(
                 df["ActualConsumption[MW]"], errors="coerce"
             )
+            df["ActualConsumption[MW]"] = df["ActualConsumption[MW]"].fillna(0)
+
 
             df["NetGeneration[MW]"] = (
                     df["ActualGenerationOutput[MW]"] - df["ActualConsumption[MW]"]
