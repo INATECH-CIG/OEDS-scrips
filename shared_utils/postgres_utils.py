@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import psycopg2
 from psycopg2 import sql
+from psycopg2.extras import execute_values
 import time
 import logging
 
@@ -187,5 +188,105 @@ def df_to_timescale(df, tablename, schema_name ='public', fillna = False):
         buffer
     )
 
+    conn.commit()
+    cur.close()
+
+def ensure_flow_tracing_tables(schemaname, cur, conn):
+    """
+    Creates the tables for flow-tracing matrices (idempotent).
+    Deliberately NOT using ensure_table(), since it does not support
+    BYTEA columns or primary keys.
+    """
+    # Main table: one row per timestamp, 6 BYTEA columns (3 matrices x 2 methods)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schemaname}.flow_tracing_matrices (
+            time         TIMESTAMPTZ NOT NULL,
+            q_agg        BYTEA,
+            a_agg        BYTEA,
+            a_inv_agg    BYTEA,
+            q_dir        BYTEA,
+            a_dir        BYTEA,
+            a_inv_dir    BYTEA,
+            n_rows       INT NOT NULL,
+            n_cols       INT NOT NULL,
+            patched_agg  BOOLEAN DEFAULT FALSE,
+            patched_dir  BOOLEAN DEFAULT FALSE,
+            PRIMARY KEY (time)
+        );
+    """)
+    conn.commit()
+
+    cur.execute(f"""
+        SELECT create_hypertable('{schemaname}.flow_tracing_matrices', 'time',
+            chunk_time_interval => INTERVAL '1 month',
+            if_not_exists => TRUE);
+    """)
+    conn.commit()
+
+    cur.execute(f"""
+        ALTER TABLE {schemaname}.flow_tracing_matrices SET (
+            timescaledb.compress,
+            timescaledb.compress_orderby = 'time DESC');
+    """)
+    conn.commit()
+
+    # Zone index: maps matrix index <-> zone name (config.zones ordering)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {schemaname}.flow_tracing_zone_index (
+            zone_idx  INT NOT NULL,
+            zone_name TEXT NOT NULL,
+            PRIMARY KEY (zone_idx)
+        );
+    """)
+    conn.commit()
+
+
+def upsert_flow_tracing_rows(rows, method, schemaname, conn):
+    """
+    Writes flow-tracing matrices into flow_tracing_matrices via upsert.
+
+    rows: list of tuples (time, q_bytes, a_bytes, a_inv_bytes, n_rows, n_cols, patched)
+    method: 'aggregated' or 'direct' -> determines the column suffixes.
+
+    Uses upsert instead of delete-then-insert, since both methods push
+    independently and must only overwrite their own columns. Timestamps that
+    one method could not compute (LinAlgError) remain NULL in its columns.
+    """
+    if method == "aggregated":
+        cols = "q_agg, a_agg, a_inv_agg, patched_agg"
+        updates = ("q_agg = EXCLUDED.q_agg, a_agg = EXCLUDED.a_agg, "
+                   "a_inv_agg = EXCLUDED.a_inv_agg, patched_agg = EXCLUDED.patched_agg")
+    elif method == "direct":
+        cols = "q_dir, a_dir, a_inv_dir, patched_dir"
+        updates = ("q_dir = EXCLUDED.q_dir, a_dir = EXCLUDED.a_dir, "
+                   "a_inv_dir = EXCLUDED.a_inv_dir, patched_dir = EXCLUDED.patched_dir")
+    else:
+        raise ValueError(f"Unknown method for flow tracing push: {method}")
+
+    insert_sql = sql.SQL("""
+        INSERT INTO {}.{} (time, {}, n_rows, n_cols)
+        VALUES %s
+        ON CONFLICT (time) DO UPDATE SET
+            {},
+            n_rows = EXCLUDED.n_rows,
+            n_cols = EXCLUDED.n_cols;
+    """).format(
+        sql.Identifier(schemaname),
+        sql.Identifier("flow_tracing_matrices"),
+        sql.SQL(cols),
+        sql.SQL(updates)
+    )
+
+    data = [
+        (
+            t.to_pydatetime() if hasattr(t, "to_pydatetime") else t,
+            psycopg2.Binary(q_b), psycopg2.Binary(a_b), psycopg2.Binary(a_inv_b),
+            n_rows, n_cols, patched
+        )
+        for (t, q_b, a_b, a_inv_b, n_rows, n_cols, patched) in rows
+    ]
+
+    cur = conn.cursor()
+    execute_values(cur, insert_sql.as_string(conn), data, page_size=500)
     conn.commit()
     cur.close()

@@ -92,6 +92,7 @@ class PipelineConfig:
             "ac_flow_tracing_analysis": True,
             "dc_flow_tracing_analysis": True,
             "pooling_analysis": True,
+            "store_tracing_matrices": True,  # stores q, A, A^-1 per timestamp as BYTEA
         }
         if analysis_flags: self.analysis_flags.update(analysis_flags)
 
