@@ -792,11 +792,13 @@ class IOHandler:
         schema_name = config.flow_matrices_schema_name
         zones = list(config.zones)
 
-        cur.execute(f"""
-            SELECT zone_idx, zone_name
-            FROM {schema_name}.flow_tracing_zone_index
-            ORDER BY zone_idx;
-        """).format(sql.Identifier(schema_name))
+        cur.execute(
+            sql.SQL("""
+                    SELECT zone_idx, zone_name
+                    FROM {}.flow_tracing_zone_index
+                    ORDER BY zone_idx;
+                    """).format(sql.Identifier(schema_name))
+        )
         existing = cur.fetchall()
 
         if existing:
