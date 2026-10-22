@@ -18,9 +18,28 @@ import sys
 import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple, Any, Callable
-from shared_utils.postgres_utils import df_to_timescale
-
+from shared_utils.postgres_utils import (
+    df_to_timescale,
+    get_connection,
+    ensure_schema,
+    ensure_flow_tracing_tables,
+    upsert_flow_tracing_rows
+)
+from psycopg2 import sql
+from psycopg2.extras import execute_values
 logger = logging.getLogger(__name__)
+
+# ==========================================
+# MATRIX SERIALIZATION HELPERS
+# ==========================================
+def matrix_to_bytes(arr) -> bytes:
+    """Serializes a numpy array (or list-of-lists) as little-endian float64 bytes."""
+    return np.ascontiguousarray(arr, dtype='<f8').tobytes()
+
+
+def bytes_to_matrix(data: bytes, n_rows: int, n_cols: int) -> np.ndarray:
+    """Deserializes BYTEA data back into a numpy array (for the visualization tool)."""
+    return np.frombuffer(data, dtype='<f8').reshape(n_rows, n_cols)
 
 # ==========================================
 # GAP AUDITING HELPERS
@@ -731,6 +750,76 @@ class IOHandler:
             logger.warning("No data found for Import_Export_per_type_per_zone.")"""
 
         logger.info("Analysis data transformation and DB push completed.")
+
+
+    def push_flow_tracing_matrices(self, config, method: str, rows: list) -> None:
+        """
+        Writes flow-tracing matrices (q, A, A^-1) as BYTEA blobs to the database.
+        rows: list of (time, q_bytes, a_bytes, a_inv_bytes, n_rows, n_cols, patched)
+        Also writes the zone index internally (idempotent).
+        Uses the dedicated flow-matrices schema from the config.
+        """
+        if not rows:
+            logger.info(f"No matrix rows to push for method={method}.")
+            return
+
+        schema_name = config.flow_matrices_schema_name
+        conn = get_connection()
+        try:
+            cur = conn.cursor()
+            # Create the dedicated schema if it does not exist yet
+            ensure_schema(schema_name, 'readonly', cur, conn)
+            ensure_flow_tracing_tables(schema_name, cur, conn)
+            self._write_flow_tracing_zone_index(config, cur, conn)
+            cur.close()
+
+            upsert_flow_tracing_rows(rows, method, schema_name, conn)
+            logger.info(f"Pushed {len(rows)} flow-tracing matrix rows (method={method}) "
+                        f"to schema {schema_name}.")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error pushing flow tracing matrices (method={method}): {e}")
+            raise
+        finally:
+            conn.close()
+
+    def _write_flow_tracing_zone_index(self, config, cur, conn) -> None:
+        """
+        Writes the zone ordering (index <-> zone name) idempotently to the database.
+        Validates the existing ordering first, so that a changed topology does not
+        silently lead to wrong zone assignments in the visualization tool.
+        """
+        schema_name = config.flow_matrices_schema_name
+        zones = list(config.zones)
+
+        cur.execute(
+            sql.SQL("""
+                    SELECT zone_idx, zone_name
+                    FROM {}.flow_tracing_zone_index
+                    ORDER BY zone_idx;
+                    """).format(sql.Identifier(schema_name))
+        )
+        existing = cur.fetchall()
+
+        if existing:
+            existing_names = [name for _, name in existing]
+            if existing_names != zones:
+                logger.warning(
+                    f"flow_tracing_zone_index mismatch: DB has {len(existing_names)} zones, "
+                    f"config has {len(zones)}. Existing matrix rows may refer to a "
+                    "different zone order. Overwriting index with current config.zones."
+                )
+
+        insert_sql = sql.SQL("""
+            INSERT INTO {}.{} (zone_idx, zone_name)
+            VALUES %s
+            ON CONFLICT (zone_idx) DO UPDATE SET zone_name = EXCLUDED.zone_name;
+        """).format(
+            sql.Identifier(schema_name),
+            sql.Identifier("flow_tracing_zone_index")
+        )
+        execute_values(cur, insert_sql.as_string(conn), list(enumerate(zones)))
+        conn.commit()
 # LOGGING & API UTILS 
 # ==========================================
 def setup_logging(log_file_path: Path, log_level_str: str, debug_mode: bool) -> None:
