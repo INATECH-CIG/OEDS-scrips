@@ -757,22 +757,25 @@ class IOHandler:
         Writes flow-tracing matrices (q, A, A^-1) as BYTEA blobs to the database.
         rows: list of (time, q_bytes, a_bytes, a_inv_bytes, n_rows, n_cols, patched)
         Also writes the zone index internally (idempotent).
+        Uses the dedicated flow-matrices schema from the config.
         """
         if not rows:
             logger.info(f"No matrix rows to push for method={method}.")
             return
 
-        schema_name = config.processed_db_schema_name
+        schema_name = config.flow_matrices_schema_name
         conn = get_connection()
         try:
             cur = conn.cursor()
+            # Create the dedicated schema if it does not exist yet
             ensure_schema(schema_name, 'readonly', cur, conn)
             ensure_flow_tracing_tables(schema_name, cur, conn)
             self._write_flow_tracing_zone_index(config, cur, conn)
             cur.close()
 
             upsert_flow_tracing_rows(rows, method, schema_name, conn)
-            logger.info(f"Pushed {len(rows)} flow-tracing matrix rows (method={method}).")
+            logger.info(f"Pushed {len(rows)} flow-tracing matrix rows (method={method}) "
+                        f"to schema {schema_name}.")
         except Exception as e:
             conn.rollback()
             logger.error(f"Error pushing flow tracing matrices (method={method}): {e}")
@@ -786,14 +789,14 @@ class IOHandler:
         Validates the existing ordering first, so that a changed topology does not
         silently lead to wrong zone assignments in the visualization tool.
         """
-        schema_name = config.processed_db_schema_name
+        schema_name = config.flow_matrices_schema_name
         zones = list(config.zones)
 
         cur.execute(f"""
             SELECT zone_idx, zone_name
             FROM {schema_name}.flow_tracing_zone_index
             ORDER BY zone_idx;
-        """)
+        """).format(sql.Identifier(schema_name))
         existing = cur.fetchall()
 
         if existing:

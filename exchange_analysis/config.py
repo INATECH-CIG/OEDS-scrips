@@ -48,6 +48,7 @@ class PipelineConfig:
         debug_mode: bool = False,
         raw_db_schema_name = None,
         processed_db_schema_name = None,
+        flow_matrices_schema_name: Optional[str] = None,
         analysis_flags: Optional[Dict[str, bool]] = None,
         io = None
     ):
@@ -99,6 +100,7 @@ class PipelineConfig:
         self.debug_mode = debug_mode
         self.raw_db_schema_name = raw_db_schema_name
         self.processed_db_schema_name = processed_db_schema_name
+        self.flow_matrices_schema_name = flow_matrices_schema_name or "entsoe-flow-matrices"
 
         # ==========================================
         # API DOWNLOAD FILTERS

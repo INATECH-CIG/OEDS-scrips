@@ -196,10 +196,14 @@ def ensure_flow_tracing_tables(schemaname, cur, conn):
     Creates the tables for flow-tracing matrices (idempotent).
     Deliberately NOT using ensure_table(), since it does not support
     BYTEA columns or primary keys.
+    NOTE: The schema name may contain hyphens (e.g. 'entsoe-flow-matrices'),
+    so all identifiers are double-quoted.
     """
+    full_table = f'"{schemaname}".flow_tracing_matrices'
+
     # Main table: one row per timestamp, 6 BYTEA columns (3 matrices x 2 methods)
     cur.execute(f"""
-        CREATE TABLE IF NOT EXISTS {schemaname}.flow_tracing_matrices (
+        CREATE TABLE IF NOT EXISTS "{schemaname}".flow_tracing_matrices (
             time         TIMESTAMPTZ NOT NULL,
             q_agg        BYTEA,
             a_agg        BYTEA,
@@ -216,30 +220,23 @@ def ensure_flow_tracing_tables(schemaname, cur, conn):
     """)
     conn.commit()
 
-    cur.execute(f"""
-        SELECT create_hypertable('{schemaname}.flow_tracing_matrices', 'time',
-            chunk_time_interval => INTERVAL '1 month',
-            if_not_exists => TRUE);
-    """)
-    conn.commit()
-
-    cur.execute(f"""
-        ALTER TABLE {schemaname}.flow_tracing_matrices SET (
-            timescaledb.compress,
-            timescaledb.compress_orderby = 'time DESC');
-    """)
+    # Hypertable: table name passed as parameter (regclass), safely quoted
+    cur.execute(
+        "SELECT create_hypertable(%s, 'time', "
+        "chunk_time_interval => INTERVAL '1 month', if_not_exists => TRUE);",
+        (full_table,)
+    )
     conn.commit()
 
     # Zone index: maps matrix index <-> zone name (config.zones ordering)
     cur.execute(f"""
-        CREATE TABLE IF NOT EXISTS {schemaname}.flow_tracing_zone_index (
+        CREATE TABLE IF NOT EXISTS "{schemaname}".flow_tracing_zone_index (
             zone_idx  INT NOT NULL,
             zone_name TEXT NOT NULL,
             PRIMARY KEY (zone_idx)
         );
     """)
     conn.commit()
-
 
 def upsert_flow_tracing_rows(rows, method, schemaname, conn):
     """
