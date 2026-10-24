@@ -85,8 +85,7 @@ def main(start_time: Optional[datetime] = None,
         analysis_flags=analysis_subset,
         debug_mode=debug_mode,
         raw_db_schema_name= f"{schema_name}_raw",
-        processed_db_schema_name= schema_name,
-        flow_matrices_schema_name= "flow_tracing_matrices"
+        processed_db_schema_name= schema_name
     )
 
     # 7. Setup Logging

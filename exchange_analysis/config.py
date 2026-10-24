@@ -48,7 +48,6 @@ class PipelineConfig:
         debug_mode: bool = False,
         raw_db_schema_name = None,
         processed_db_schema_name = None,
-        flow_matrices_schema_name: Optional[str] = None,
         analysis_flags: Optional[Dict[str, bool]] = None,
         io = None
     ):
@@ -93,14 +92,12 @@ class PipelineConfig:
             "ac_flow_tracing_analysis": True,
             "dc_flow_tracing_analysis": True,
             "pooling_analysis": True,
-            "store_tracing_matrices": True,  # stores q, A, A^-1 per timestamp as BYTEA
         }
         if analysis_flags: self.analysis_flags.update(analysis_flags)
 
         self.debug_mode = debug_mode
         self.raw_db_schema_name = raw_db_schema_name
         self.processed_db_schema_name = processed_db_schema_name
-        self.flow_matrices_schema_name = flow_matrices_schema_name or "entsoe-flow-matrices"
 
         # ==========================================
         # API DOWNLOAD FILTERS
