@@ -15,6 +15,7 @@ import numpy as np
 import logging
 from typing import Dict, Optional, Tuple, List, Any
 from exchange_analysis.config import PipelineConfig
+from exchange_analysis.utils import matrix_to_bytes
 
 
 logger = logging.getLogger(__name__)
@@ -271,9 +272,13 @@ def perform_aggregated_flow_tracing(
     agg_tracing = {bz: pd.DataFrame(0.0, index=config.time_index, columns=config.zones, dtype=float) for bz in config.zones}
     agg_dir = config.output_dir / "import_flow_tracing_bidding_zones/agg_coupling" / str(config.year)
     sing_times: List[pd.Timestamp] = []
-    
+
+    matrix_rows: List[tuple] = []
+
+
     logger.info("[Agg. Coupling] Inverting Matrices...")
     for t in config.time_index:
+        patched_this_step = False
         Pin: List[List[float]] = []
         A: List[List[float]] = []
         net_imps: List[float] = []
@@ -315,13 +320,26 @@ def perform_aggregated_flow_tracing(
                     f"Net Export: {bz_net:.2f} | Borders: {borders}. "
                     f"Applying 1.0 patch to permit inversion."
                 )
-                
+
+                patched_this_step = True
+
                 # Enforce non-zero diagonal to permit matrix inversion
                 A[idx][idx] = 1.0
         
         # Execute topology inversion
         try:
-            q = np.dot(np.linalg.inv(A), Pin)
+            A_inv = np.linalg.inv(A)
+            q = A_inv @ Pin
+            matrix_rows.append((
+                t,
+                matrix_to_bytes(q),
+                matrix_to_bytes(A),
+                matrix_to_bytes(A_inv),
+                len(config.zones),
+                len(config.zones),
+                patched_this_step
+            ))
+
             for x in range(len(config.zones)):
                 imps = net_imps[x] * q[x]
                 for i in range(len(imps)):
@@ -343,6 +361,9 @@ def perform_aggregated_flow_tracing(
         pd.DataFrame(sing_times, columns=["Timepoints"]).to_csv(log_path, index=False)
     elif log_path.exists():
         log_path.unlink()
+
+    if config.analysis_flags.get("store_tracing_matrices", True) and not config.debug_mode:
+        config.io.push_flow_tracing_matrices(config, "aggregated", matrix_rows)
         
     _decompose_and_save(config, agg_tracing, agg_dir, "agg_coupling", gen_dfs_loaded)
 
@@ -364,9 +385,14 @@ def perform_direct_flow_tracing(
     dir_tracing = {bz: pd.DataFrame(0.0, index=config.time_index, columns=config.zones, dtype=float) for bz in config.zones}
     direct_dir = config.output_dir / "import_flow_tracing_bidding_zones/direct_coupling" / str(config.year)
     sing_times: List[pd.Timestamp] = []
+
+    matrix_rows: List[tuple] = []
     
     logger.info("[Direct Coupling] Inverting Matrices...")
     for t in config.time_index:
+
+        patched_this_step = False
+
         Gin: List[List[float]] = []
         A: List[List[float]] = []
         demands: List[float] = []
@@ -436,10 +462,21 @@ def perform_direct_flow_tracing(
                 
                 # Enforce non-zero diagonal to permit matrix inversion
                 A[idx][idx] = 1.0
+                patched_this_step = True
         
         # Execute topology inversion
         try:
-            q = np.dot(np.linalg.inv(A), Gin)
+            A_inv = np.linalg.inv(A)
+            q = A_inv @ Gin
+            matrix_rows.append((
+                t,
+                matrix_to_bytes(q),
+                matrix_to_bytes(A),
+                matrix_to_bytes(A_inv),
+                len(config.zones),
+                len(config.zones),
+                patched_this_step
+            ))
             for x in range(len(config.zones)):
                 imps = demands[x] * q[x]
                 for i in range(len(imps)):
@@ -461,6 +498,9 @@ def perform_direct_flow_tracing(
         pd.DataFrame(sing_times, columns=["Timepoints"]).to_csv(log_path, index=False)
     elif log_path.exists():
         log_path.unlink()
+
+    if config.analysis_flags.get("store_tracing_matrices", True) and not config.debug_mode:
+        config.io.push_flow_tracing_matrices(config, "direct", matrix_rows)
         
     _decompose_and_save(config, dir_tracing, direct_dir, "direct_coupling", gen_dfs_loaded)
 
