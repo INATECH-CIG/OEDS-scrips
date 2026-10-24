@@ -250,11 +250,11 @@ def upsert_flow_tracing_rows(rows, method, schemaname, conn):
     one method could not compute (LinAlgError) remain NULL in its columns.
     """
     if method == "aggregated":
-        cols = "q_agg, a_agg, a_inv_agg, n_rows, patched_agg"
+        cols = "q_agg, a_agg, a_inv_agg, n_rows, n_cols, patched_agg"
         updates = ("q_agg = EXCLUDED.q_agg, a_agg = EXCLUDED.a_agg, "
                    "a_inv_agg = EXCLUDED.a_inv_agg, patched_agg = EXCLUDED.patched_agg")
     elif method == "direct":
-        cols = "q_dir, a_dir, a_inv_dir, n_rows, patched_dir"
+        cols = "q_dir, a_dir, a_inv_dir, n_rows, n_cols, patched_dir"
         updates = ("q_dir = EXCLUDED.q_dir, a_dir = EXCLUDED.a_dir, "
                    "a_inv_dir = EXCLUDED.a_inv_dir, patched_dir = EXCLUDED.patched_dir")
     else:
